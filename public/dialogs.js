@@ -23,12 +23,6 @@ async function resolveDefaultSessionOptions(project) {
   return options;
 }
 
-async function forkSession(session, project) {
-  const options = await resolveDefaultSessionOptions(project);
-  options.forkFrom = session.sessionId;
-  launchNewSession(project, options);
-}
-
 async function launchScheduleCreator(project) {
   const options = await resolveDefaultSessionOptions(project);
   // Pre-create a JSONL session with the schedule creation prompt, then resume into it

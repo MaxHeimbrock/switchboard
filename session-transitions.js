@@ -32,11 +32,10 @@ function readNewSessionSignals(filePath) {
     let planContent = false;
     let slug = null;
     let parentSessionId = null;
-    let hasSnapshots = false;
     for (const line of lines) {
       const entry = JSON.parse(line);
       // Skip snapshot lines — they carry no fork/session signals
-      if (entry.type === 'file-history-snapshot') { hasSnapshots = true; continue; }
+      if (entry.type === 'file-history-snapshot') continue;
       if (entry.forkedFrom) forkedFrom = entry.forkedFrom.sessionId;
       if (entry.planContent) planContent = true;
       if (entry.slug && !slug) slug = entry.slug;
@@ -45,9 +44,9 @@ function readNewSessionSignals(filePath) {
       // Stop after finding a user or assistant message
       if (entry.type === 'user' || entry.type === 'assistant') break;
     }
-    return { forkedFrom, planContent, slug, parentSessionId, hasSnapshots };
+    return { forkedFrom, planContent, slug, parentSessionId };
   } catch {
-    return { forkedFrom: null, planContent: false, slug: null, parentSessionId: null, hasSnapshots: false };
+    return { forkedFrom: null, planContent: false, slug: null, parentSessionId: null };
   }
 }
 
@@ -86,15 +85,12 @@ function detectSessionTransitions(folder) {
 
   for (const [sessionId, session] of [...activeSessions]) {
     if (session.exited || session.isPlainTerminal || !session.knownJsonlFiles || session.projectFolder !== folder) {
-      if (!session.exited && !session.isPlainTerminal && session.forkFrom) {
-        log.info(`[fork-detect] skipped session=${sessionId} forkFrom=${session.forkFrom||'none'} reason=${session.exited ? 'exited' : session.isPlainTerminal ? 'terminal' : !session.knownJsonlFiles ? 'noKnown' : 'folderMismatch('+session.projectFolder+' vs '+folder+')'}`);
-      }
       continue;
     }
 
     const newFiles = currentFiles.filter(f => !session.knownJsonlFiles.has(f));
 
-    if (newFiles.length > 0) log.debug(`[detect] session=${sessionId} forkFrom=${session.forkFrom||'none'} folder=${folder} newFiles=${newFiles.length} knownCount=${session.knownJsonlFiles.size} currentCount=${currentFiles.length}`);
+    if (newFiles.length > 0) log.debug(`[detect] session=${sessionId} folder=${folder} newFiles=${newFiles.length} knownCount=${session.knownJsonlFiles.size} currentCount=${currentFiles.length}`);
 
     if (newFiles.length === 0) continue;
 
@@ -108,49 +104,27 @@ function detectSessionTransitions(folder) {
       // File exists but has no parseable content yet — skip and retry next cycle
       // But if the file's mtime is older than 1 hour, treat it as stale and archive it
       if (!signals.forkedFrom && !signals.parentSessionId && !signals.slug && !signals.planContent) {
-        // Fork file with only snapshots (no user turn yet) — match immediately
-        if (signals.hasSnapshots && session.forkFrom && !session.realSessionId) {
-          log.info(`[detect] session=${sessionId} matching snapshot-only fork file=${newId}`);
-          // Fall through to matching logic — will match via the fork-snapshot path below
+        let stale = false;
+        try {
+          const mtime = fs.statSync(path.join(folderPath, newFile)).mtimeMs;
+          if (Date.now() - mtime > 3600000) stale = true;
+        } catch {}
+        if (stale) {
+          log.info(`[detect] session=${sessionId} archiving stale empty file=${newId}`);
         } else {
-          let stale = false;
-          try {
-            const mtime = fs.statSync(path.join(folderPath, newFile)).mtimeMs;
-            if (Date.now() - mtime > 3600000) stale = true;
-          } catch {}
-          if (stale) {
-            log.info(`[detect] session=${sessionId} archiving stale empty file=${newId}`);
-          } else {
-            emptyFiles.add(newFile);
-          }
-          continue;
+          emptyFiles.add(newFile);
         }
+        continue;
       }
 
-      if (session.forkFrom) {
-        log.info(`[detect] session=${sessionId} checking newFile=${newId} signals=${JSON.stringify({forkedFrom: signals.forkedFrom||null, parentSessionId: signals.parentSessionId||null, slug: signals.slug||null})} forkFrom=${session.forkFrom}`);
-      } else {
-        log.debug(`[detect] session=${sessionId} checking newFile=${newId} signals=${JSON.stringify({forkedFrom: signals.forkedFrom||null, parentSessionId: signals.parentSessionId||null, slug: signals.slug||null})} forkFrom=none`);
-      }
+      log.debug(`[detect] session=${sessionId} checking newFile=${newId} signals=${JSON.stringify({forkedFrom: signals.forkedFrom||null, parentSessionId: signals.parentSessionId||null, slug: signals.slug||null})}`);
 
       let matched = false;
 
-      // Fork: forkedFrom.sessionId matches this active PTY or the session it was forked from
-      if (signals.forkedFrom === sessionId || (session.forkFrom && signals.forkedFrom === session.forkFrom)) {
+      // Fork: the new file's own forkedFrom points back at this active PTY
+      // (a session that forks itself mid-run, e.g. via `claude --fork-session`)
+      if (signals.forkedFrom === sessionId) {
         matched = true;
-      }
-      // --fork-session: new file's parentSessionId matches the forkFrom source,
-      // and the new file's name (newId) differs from both our PTY id and the source
-      if (!matched && session.forkFrom && signals.parentSessionId === session.forkFrom && newId !== session.forkFrom) {
-        matched = true;
-      }
-      // Fork file with only snapshots — no user turn yet, but this session is waiting for a fork
-      if (!matched && signals.hasSnapshots && session.forkFrom && !session.realSessionId) {
-        matched = true;
-      }
-
-      if (session.forkFrom && !matched) {
-        log.info(`[detect] session=${sessionId} NO MATCH for newFile=${newId} forkFrom=${session.forkFrom} parentSessionId=${signals.parentSessionId||'null'} forkedFrom=${signals.forkedFrom||'null'}`);
       }
 
       // Plan-accept: shared slug + planContent + old session has ExitPlanMode
@@ -170,7 +144,7 @@ function detectSessionTransitions(folder) {
       }
 
       if (matched) {
-        log.info(`[session-transition] ${sessionId} → ${newId} (${signals.forkedFrom || session.forkFrom ? 'fork' : 'plan-accept'})`);
+        log.info(`[session-transition] ${sessionId} → ${newId} (${signals.forkedFrom ? 'fork' : 'plan-accept'})`);
         session.knownJsonlFiles = new Set(currentFiles);
         session.realSessionId = newId;
         // Update slug from new session

@@ -930,7 +930,7 @@ initGridObservers();
 // Memory viewer → plans-memory-view.js
 
 
-// Dialogs (resolveDefaultSessionOptions, forkSession, showNewSessionPopover,
+// Dialogs (resolveDefaultSessionOptions, showNewSessionPopover,
 // showNewSessionDialog, showResumeSessionDialog, showAddProjectDialog, launchTerminalSession) → dialogs.js
 
 

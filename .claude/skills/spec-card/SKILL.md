@@ -10,38 +10,32 @@ Converts a one-line Trello card into a spec Max has actually agreed to, by askin
 questions **as comments on the card** and reading his answers back from the same card.
 The card description becomes the spec document; the comment thread is the transcript.
 
-All Trello access goes through `scripts/trello.py` — a symlink to the shared
-`.claude/scripts/trello.py` that every phase skill uses. Run it from the skill directory or
-by absolute path; it loads `~/.trello.env` itself. **Never print `TRELLO_TOKEN`.**
+**Read `PIPELINE.md` (next to this file) before your first `claim`.** It carries the rules
+every phase on this board shares: the board model, the two lists that are Max's, the helper
+and its commands, the claim/lock protocol, questionnaire mechanics, and how a phase ends.
+This file carries only what is specific to the spec phase.
 
-The script takes a `--phase` flag selecting which phase of the pipeline it works on. It
-defaults to `spec`, which is this skill's phase, so every command below is written without
-it. Pass `--phase plan` only if you are deliberately inspecting plan-card's queue.
+## This phase
+
+| | |
+|---|---|
+| **Flag** | none — `--phase spec` is the script's default, so every command below omits it |
+| **Claims** | `Ready` cards carrying **no phase label** |
+| **Produces** | the `Spec` label, then back to `Ready` for plan-card |
+| **Sentinel** | `🔍 Spec-me round N — M questions` |
+| **Writes** | the card description and comments. **Never repo code.** |
 
 ```
 ./scripts/trello.py claim                     # claim the next card — START HERE
 ./scripts/trello.py release <id> <nonce>      # drop the claim when you stop
-./scripts/trello.py pick                      # read-only peek, claims nothing
-./scripts/trello.py card <id>                 # name, desc, list, labels
 ./scripts/trello.py comments <id>             # thread + questionnaire/answer split
 ./scripts/trello.py post-comment <id> <file>  # post a comment from a file
 ./scripts/trello.py set-desc <id> <file>      # replace the description
-./scripts/trello.py move <id> "In Review"     # Backlog|Ready|In Progress|In Review|Done
-./scripts/trello.py label <id> Spec           # Spec|Plan|PR
+./scripts/trello.py move <id> "In Review"
+./scripts/trello.py label <id> Spec
 ```
 
-Write comment and description bodies to files in the scratchpad first, then pass the path.
-Never build them as inline shell strings — the text is markdown with newlines and quotes.
-
-## Board conventions
-
-- **List = who holds the baton.** `Backlog` **Max's** — never picked by any skill ·
-  `Ready` Max has released it, next agent's turn · `In Progress` an agent is working ·
-  `In Review` waiting on Max · `Done` shipped.
-- **Label = the last phase *completed*.** `Spec` → plan-card's turn. `Plan` →
-  build-card's turn. `PR` → open for review. No label → this skill's turn.
-
-So a card is this skill's only when it carries **none** of those labels. `pick` enforces this.
+Pass `--phase plan` only if you are deliberately inspecting plan-card's queue.
 
 ## The loop
 
@@ -51,106 +45,29 @@ So a card is this skill's only when it carries **none** of those labels. `pick` 
 | 1 | `Ready`, no label | this skill | `claim` it (auto-moves to `In Progress`) |
 | 2 | `In Progress` | this skill | Seed description, post round-1 questions → move to `In Review` |
 | 3 | `In Review` | **Max** | Answers in a comment, then **moves the card to `Ready` himself** |
-| 4 | `Ready`, no label | this skill | `claim` it again (auto-moves to `In Progress`), read answers, update the spec |
+| 4 | `Ready`, no label | this skill | `claim` it again, read answers, update the spec |
 | 5 | `In Progress` | this skill | Questions still open → go to step 2 (round *n+1*). None → final spec, add `Spec` label, move to `Ready`, stop |
 | 6 | `Ready` + `Spec` | plan-card | Not this skill's card any more |
 
-### What `claim` hands you
+`mode: new` here means the card has no `Spec-me` questionnaire yet — post round 1, wherever
+the card sat. On `stalled`, re-post rather than assuming consent; see `PIPELINE.md §5`.
 
-Both `claim` and `pick` report a `mode` derived from the **comment thread**, not from the
-list — every card arrives from `Ready`, whether it is starting round 1 or coming back with
-answers. Act on the mode, not on the list:
+## What makes a question worth asking
 
-| mode | Means | Do |
-|---|---|---|
-| `new` | No questionnaire on the card yet | Post round 1 (step 2) |
-| `resume` | Answers arrived since round *N* | Fold them in (step 4) |
-| `stalled` | Round *N* posted, no answers since | Max moved it without answering — see below |
+Read the code before writing questions. Use `Grep`/`Read` on the repo to answer everything
+the repo can answer — asking Max what the codebase already states wastes the round and
+erodes his trust in the loop.
 
-### The trigger is strict — never jump the gun
+On top of the general bar in `PIPELINE.md §6`, a spec question is about **observable
+behaviour, scope, and edge cases — not implementation.** Mechanism is the plan skill's job;
+do not ask which file or function to touch.
 
-**Only `Ready` cards are ever picked up.** `claim` scans that one list and nothing else.
+Cap each round at **8 questions**, grouped under short bold headings. Fewer, sharper
+questions beat exhaustive ones — a round Max can clear in two minutes is a round he'll
+actually clear. Prefer asking about: scope boundaries, what happens in the awkward case,
+what the user sees, back-compat for existing sessions/DBs, and what "done" looks like.
 
-**`Backlog` is Max's alone.** It is where raw ideas sit until he judges one worth building.
-A card leaves it only when he drags it to `Ready` himself — that drag *is* the go-ahead to
-spec it. Never pick, claim, read-for-work, or move a `Backlog` card, however obvious or
-long-parked it looks, and never suggest speccing one as a way to fill an empty queue. If
-`Ready` holds nothing this skill owns, `claim` reports `{"card": null}` and you stop:
-an empty queue means Max has released nothing, which is the correct outcome, not a
-problem to route around.
-
-A card in `In Review` likewise belongs to Max, however long it sits there and however many
-comments appear on it. Moving it to `Ready` is his deliberate signal that the review round
-is finished; that decision is his alone. Do not poll `In Review`, do not act on a new
-comment there, do not move it out yourself.
-
-### Claiming — always start with `claim`, never `pick`
-
-`pick` is read-only, for peeking at the queue. It is **not** safe to act on: reading the
-card and moving it are two round trips, so two agents can both read the same `Ready` card
-before either moves it. Switchboard runs multiple sessions and fires scheduled tasks, so
-this race is real, not theoretical.
-
-`claim` closes it. It posts a lock comment *first*, re-reads the thread, and only proceeds
-if its own lock is the oldest live one — Trello orders comments server-side, which is what
-makes the winner decidable. The loser withdraws its lock and reports `{"card": null}`.
-Verified with three concurrent claims on one card: one winner, two clean back-offs.
-
-A claim gives you a `lock` nonce. **Release it before you stop**, in the same run:
-
-```
-./scripts/trello.py release <id> <nonce>
-```
-
-Release *before* the final `move` out of `In Progress`, so the card is never sitting in a
-queue-eligible list with a stale lock on it. A lock left behind by a crashed run is reaped
-automatically after 15 minutes, so a dropped release costs a delay, not a wedged card.
-
-`claim` also moves the card to `In Progress` and skips any card that already holds a live
-lock. `In Progress` is therefore the visible half of the mutex and the lock comment is the
-authoritative half — never hand-move a card into `In Progress` to fake a claim, and never
-leave a card parked there.
-
-**On `stalled`:** do **not** write a spec from assumed defaults — a card arriving in
-`Ready` with no answers at all is far more likely a misdrag than blanket consent. Re-post
-the open questions as a fresh round, noting they are a repeat, move back to `In Review`,
-and stop.
-
-### Resolving a round — when can the spec be written?
-
-The bar is **not** "every question got a reply". Round 1 promises Max that skipping a
-question means taking the bracketed assumption, so re-asking a question he deliberately
-skipped breaks that promise and the loop never terminates. Once *any* answer comes back,
-every question in that round is resolved:
-
-- **answered** → record the decision in `## Decisions`
-- **skipped** → the bracketed assumption becomes the decision, recorded as
-  `<decision> — round n, assumed (unanswered)` so he can spot and overturn it
-- **deferred** — he explicitly says he doesn't know or wants to decide later → stays open
-- **ambiguous** — the answer is unparseable, or contradicts one of his other answers →
-  stays open, and round *n+1* quotes both back to him and asks which wins
-
-Match answers by **content, not just by number** — Max may restart numbering per round
-(round 2's question 7 came back as "1. Yes (a) is correct"). When a round has one question
-the mapping is unambiguous; when it has several and the numbering looks off, treat the
-mismatch as `ambiguous` rather than guessing.
-
-Only `deferred` and `ambiguous` answers, plus genuinely new questions his answers raise,
-carry into the next round. Everything else is settled. In practice most cards finish in one
-round, and a second round should be one or two questions, not another six.
-
-**Cap: 3 rounds.** At round 3, stop asking and write the spec from what is decided,
-listing whatever is still unresolved under a `## Risks` heading in the description and
-calling it out in the closing comment. An endless questionnaire is worse than a spec with
-two stated unknowns — the plan skill can raise them again with a concrete plan in hand.
-
-## Comment format
-
-Every questionnaire comment's **first line must be** `🔍 Spec-me round N — M questions`.
-The helper detects rounds by that prefix, and this is load-bearing: the API token acts as
-Max himself, so comments this skill posts are attributed to *him*. Authorship cannot
-separate questions from answers — only the sentinel can. A questionnaire without it is
-invisible to the next run, and its answers will never be found.
+Ask nothing you can decide yourself and state as an assumption.
 
 ```
 🔍 Spec-me round 1 — 5 questions
@@ -166,27 +83,6 @@ take the assumption in brackets. Then move the card to Ready.
 **Edges**
 3. ...
 ```
-
-## What makes a question worth asking
-
-Read the code before writing questions. Use `Grep`/`Read` on the repo to answer everything
-the repo can answer — asking Max what the codebase already states wastes the round and
-erodes his trust in the loop.
-
-Each question must:
-
-- **force a decision** that changes what gets built — not gather colour
-- **carry a bracketed default assumption**, so silence is a safe answer
-- **be answerable in a few words**, from a phone
-- be about **observable behaviour, scope, and edge cases** — not implementation. Mechanism
-  is the plan skill's job; do not ask which file or function to touch.
-
-Cap each round at **8 questions**, grouped under short bold headings. Fewer, sharper
-questions beat exhaustive ones — a round Max can clear in two minutes is a round he'll
-actually clear. Prefer asking about: scope boundaries, what happens in the awkward case,
-what the user sees, back-compat for existing sessions/DBs, and what "done" looks like.
-
-Ask nothing you can decide yourself and state as an assumption.
 
 ## Description skeleton
 
@@ -226,17 +122,18 @@ When `## Open questions` is empty, or the 3-round cap is reached:
    from Max: scope, behaviour, edge cases, out-of-scope, and acceptance criteria.
 2. `label <id> Spec`
 3. `release <id> <nonce>`, then `move <id> Ready` — in that order
-4. Post a short closing comment (no sentinel — it is not a questionnaire) summarising what
-   was agreed and noting any assumed-unanswered decisions.
+4. Post a short closing comment (no sentinel) summarising what was agreed and noting any
+   assumed-unanswered decisions.
 
 Then stop. The card is the plan skill's.
 
 ## Never
 
-- Print `TRELLO_TOKEN`, or paste a URL containing it into output.
-- Delete or edit any comment other than a lock comment (`claim` / `release` own those).
+`PIPELINE.md §9` applies in full. In particular, and specific to this phase:
+
 - Pick up, claim, or move a card in `Backlog` — releasing one to `Ready` is Max's call alone.
 - Move a card out of `In Review` — that is Max's move and the whole point of the loop.
-- Move a card to `Done`.
-- Touch cards on any board but Switchboard, or cards carrying `Spec` / `Plan` / `PR`.
+- Print `TRELLO_TOKEN`, or paste a URL containing it into output.
+- Touch a card carrying `Spec` / `Plan` / `PR` / `Approved` — it is past this phase.
+- Ask about mechanism, or re-ask a question Max deliberately skipped.
 - Write repo code. This skill produces a spec, nothing else.

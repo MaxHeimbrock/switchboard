@@ -385,6 +385,12 @@ ticks them off in the PR as he does each manual pass.
 
 Trello: <card shortUrl>
 
+## Run it
+
+```
+npm --prefix ~/dev/learning/switchboard/.claude/worktrees/<SLUG> run electron-dev
+```
+
 ## Verification
 Ticked = run by me and passing. Unticked = needs you at a GUI; I have not run it.
 
@@ -395,6 +401,14 @@ Ticked = run by me and passing. Unticked = needs you at a GUI; I have not run it
 ## Deviations from the plan
 - <each one, and why. Omit the section if there were none.>
 ```
+
+The `## Run it` command is mandatory on every PR, every round. The manual checklist items all
+need Max at a running app, and the worktree lives at a path he has not typed and would otherwise
+have to reconstruct — so hand him the exact line to copy. Substitute this card's `SLUG` into it
+literally (the worktree directory is the slug, not the branch, so no `feat/` prefix), keep the
+`~` form rather than expanding `/Users/maxheimbrock`, and use `electron-dev` — it runs against
+`~/.switchboard-dev`, so poking at the branch cannot disturb his real data. Put it in a fenced
+block on its own line so GitHub gives him a copy button.
 
 Every line of the plan's `**Verification**` block appears here, none dropped and none reworded
 — it is the spec's acceptance criteria in disguise, and a check that goes missing from the list
@@ -422,6 +436,8 @@ Rules for the updated checklist:
   worse than an empty box, because he has already stopped looking at it.
 - Add an item for anything this round's feedback introduced.
 - Re-run every automated check and update its result. They are cheap; assume nothing carries over.
+- Keep the `## Run it` command in the body, pointing at this card's worktree. If the worktree had
+  to be recreated at a different path this round, correct the line rather than leaving a stale one.
 
 The PR keeps its number and URL, stays a draft, and stays open.
 
@@ -491,6 +507,7 @@ re-litigate a `## Decisions` entry or re-open the spec.
 - Act on PR feedback while the card is still in `In Review`. Wait for Max to move it to `Ready`.
 - Drop a piece of review feedback without either a code change or a reply saying why not.
 - Tick a checklist item you did not run, or drop one from the plan's Verification block.
+- Open or update a PR whose body is missing the `## Run it` command for this card's worktree.
 - Edit the card description, or delete/edit any comment other than a lock comment.
 - Move a card out of `In Review` — that is Max's move.
 - Move a card to `Done`, or add or remove the `Approved` label. Approving is Max's; merging

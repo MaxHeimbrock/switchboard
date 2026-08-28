@@ -7,7 +7,7 @@
 // Depends on: cleanDisplayName, formatDate, escapeHtml (utils.js), ICONS (icons.js),
 // showSession (terminal-manager.js), confirmAndStopSession, pollActiveSessions,
 // showNewSessionPopover, openSettingsViewer, showResumeSessionDialog,
-// showJsonlViewer, forkSession, openSession, loadProjects, markUnread,
+// showJsonlViewer, openSession, loadProjects, markUnread,
 // clearUnread, refreshSidebar (app.js/dialogs.js)
 
 function slugId(slug) {
@@ -602,20 +602,6 @@ function rebindSidebarEvents(projects) {
       };
     }
 
-    const forkBtn = item.querySelector('.session-fork-btn');
-    if (forkBtn) {
-      forkBtn.onclick = async (e) => {
-        e.stopPropagation();
-        // Find the project for this session
-        const project = [...cachedAllProjects, ...cachedProjects].find(p =>
-          p.sessions.some(s => s.sessionId === session.sessionId)
-        );
-        if (project) {
-          forkSession(session, project);
-        }
-      };
-    }
-
     const jsonlBtn = item.querySelector('.session-jsonl-btn');
     if (jsonlBtn) {
       jsonlBtn.onclick = (e) => {
@@ -726,11 +712,6 @@ function buildSessionItem(session) {
   archiveBtn.title = session.archived ? 'Unarchive' : 'Archive';
   archiveBtn.innerHTML = ICONS.archive(16);
 
-  const forkBtn = document.createElement('button');
-  forkBtn.className = 'session-fork-btn';
-  forkBtn.title = 'Fork session';
-  forkBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5"/><path d="M8 3h-5v5"/><path d="M21 3l-7.536 7.536a5 5 0 0 0-1.464 3.534v6.93"/><path d="M3 3l7.536 7.536a5 5 0 0 1 1.464 3.534v.93"/></svg>';
-
   const jsonlBtn = document.createElement('button');
   jsonlBtn.className = 'session-jsonl-btn';
   jsonlBtn.title = 'View messages';
@@ -750,7 +731,6 @@ function buildSessionItem(session) {
   actions.appendChild(stopBtn);
   actions.appendChild(unreadBtn);
   if (session.type !== 'terminal') {
-    actions.appendChild(forkBtn);
     actions.appendChild(jsonlBtn);
     actions.appendChild(archiveBtn);
     actions.appendChild(launchConfigBtn);

@@ -1059,9 +1059,7 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
     } else {
       // Build claude command, using array to prevent accidental shell injection
       const claudeArgs = [];
-      if (sessionOptions?.forkFrom) {
-        claudeArgs.push('--resume', String(sessionOptions.forkFrom), '--fork-session');
-      } else if (isNew) {
+      if (isNew) {
         claudeArgs.push('--session-id', String(sessionId));
       } else {
         claudeArgs.push('--resume', String(sessionId));
@@ -1077,7 +1075,7 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
         // isolated git worktree. Resuming (isNew === false) must reuse the
         // session's existing directory, so ignore the worktree option on resume
         // regardless of which call site supplied it (sidebar click, schedule
-        // creator, fork, …). Otherwise a resume tries to spin up a new worktree
+        // creator, …). Otherwise a resume tries to spin up a new worktree
         // and fails to attach.
         if (isNew && sessionOptions.worktree) {
           claudeArgs.push('--worktree');
@@ -1152,7 +1150,7 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
     outputBuffer: [], outputBufferSize: 0, altScreen: false,
     projectPath, firstResize: true,
     projectFolder, knownJsonlFiles, sessionSlug,
-    isPlainTerminal, forkFrom: sessionOptions?.forkFrom || null,
+    isPlainTerminal,
     mcpServer, _openedAt: Date.now(),
   };
   activeSessions.set(sessionId, session);
@@ -1268,10 +1266,6 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
     // Clean up the original key too in case transition detection hasn't run yet
     activeSessions.delete(sessionId);
   });
-
-  if (sessionOptions?.forkFrom) {
-    log.info(`[fork-spawn] tempId=${sessionId} forkFrom=${sessionOptions.forkFrom} folder=${projectFolder} knownFiles=${knownJsonlFiles.size}`);
-  }
 
   return { ok: true, reattached: false, mcpActive: !!mcpServer };
 });

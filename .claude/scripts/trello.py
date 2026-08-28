@@ -17,6 +17,10 @@ The pr phase accepts its own output label as well as its input one: a card Max h
 reviewed and moved back to Ready carries PR already, and comes round again for
 another pass on the same branch. `pick`/`claim` report that as "revision": true.
 
+Every phase draws from Ready only. Backlog is Max's staging area: a card leaves it
+because he decided it is worth working on and dragged it to Ready, never because a
+skill picked it up.
+
 Approved is the one label no skill applies - Max adds it by hand in In Review once
 he has tested the PR and is happy for it to land. Because phase_of takes the
 FURTHEST label in pipeline order, approving a card also lifts it out of the pr
@@ -24,6 +28,8 @@ phase's queue, which is what routes it to merge-card rather than to another buil
 round. Removing the label hands it back to build-card.
 
 Subcommands:
+  survey                   the whole Ready queue bucketed by owning phase, in dispatch
+                           order (phase-independent - this is /check-board's view)
   pick                     inspect the next card this phase owns (read-only, no claim)
   claim                    pick AND lock it -> JSON with a nonce, or {"card": null}
   release <id> <nonce>     drop the lock taken by claim
@@ -77,20 +83,24 @@ PHASES = {
     "spec": {
         "requires": (None,),
         "produces": "Spec",
+        "skill": "spec-card",
         "sentinel": "Spec-me round",
-        # Backlog is in scope only for the first phase - a card parked there with a
-        # phase label already on it was parked deliberately.
-        "lists": ("Ready", "Backlog"),
+        # Ready only, like every other phase. Backlog is Max's staging area: a card
+        # sits there until HE decides it is worth speccing and drags it to Ready.
+        # No skill may take that decision for him, so Backlog is never scanned.
+        "lists": ("Ready",),
     },
     "plan": {
         "requires": ("Spec",),
         "produces": "Plan",
+        "skill": "plan-card",
         "sentinel": "Plan-me round",
         "lists": ("Ready",),
     },
     "pr": {
         "requires": ("Plan", "PR"),
         "produces": "PR",
+        "skill": "build-card",
         "sentinel": "Build-me round",
         "lists": ("Ready",),
     },
@@ -99,11 +109,18 @@ PHASES = {
     "merge": {
         "requires": ("Approved",),
         "produces": None,
+        "skill": "merge-card",
         "sentinel": "Merge-me round",
         "lists": ("Ready",),
     },
 }
 DEFAULT_PHASE = "spec"
+
+# The order /check-board hands cards on in: furthest along the pipeline first.
+# An approved PR left unmerged holds up main, a reviewed PR left unrevised holds up
+# Max, and starting a fresh spec adds work in flight without finishing any of it. So
+# merge drains before pr, pr before plan, plan before spec.
+DISPATCH_ORDER = ("merge", "pr", "plan", "spec")
 
 # Advisory lock, needed because `pick` reading a card and the follow-up `move`
 # are two round trips: without it, two agents both read the same Ready card
@@ -253,11 +270,66 @@ def summarise(card):
     }
 
 
+def brief(card):
+    """Enough to route on and report, minus `desc` - by the plan phase that is a whole
+    document, and four of them would swamp a queue listing."""
+    out = summarise(card)
+    out.pop("desc")
+    return out
+
+
 def cmd_card(card_id):
     card = api(
         "GET", f"/cards/{card_id}", fields="id,name,desc,shortUrl,labels,pos,idList"
     )
     print(json.dumps(summarise(card), indent=2))
+
+
+def cmd_survey():
+    """The whole queue in one pass: every Ready card bucketed by the phase that owns
+    it, plus the one card /check-board should dispatch next.
+
+    Deliberately cheap - two list reads, no per-card comment fetch. It reports no
+    `mode` and takes no lock, because the phase skill it routes to does its own
+    `claim`, and that is the only authoritative read. A card mid-claim has already
+    been moved out of Ready, so leaving locks out here costs nothing.
+    """
+    owner_of = {}
+    for phase in DISPATCH_ORDER:
+        for state in PHASES[phase]["requires"]:
+            owner_of[state] = phase
+
+    queue = {phase: [] for phase in DISPATCH_ORDER}
+    unowned = []
+    for card in cards_in("Ready"):
+        phase = owner_of.get(phase_of(card))
+        (queue[phase] if phase else unowned).append(brief(card))
+
+    nxt = None
+    for phase in DISPATCH_ORDER:
+        if queue[phase]:
+            nxt = {
+                "phase": phase,
+                "skill": PHASES[phase]["skill"],
+                "card": queue[phase][0],
+            }
+            break
+
+    print(
+        json.dumps(
+            {
+                "next": nxt,
+                "queue": queue,
+                # A label combination no phase claims - only reachable if the board
+                # gains a pipeline label the script does not know about.
+                "unowned": unowned,
+                # Reported so an empty queue can be told apart from an empty board.
+                # Max's staging area: counted, never dispatched.
+                "backlog": len(cards_in("Backlog")),
+            },
+            indent=2,
+        )
+    )
 
 
 def thread_state(card_id, phase):
@@ -428,6 +500,7 @@ def cmd_label(card_id, name):
 
 # name -> (fn, positional argc, wants the phase appended)
 COMMANDS = {
+    "survey": (cmd_survey, 0, False),
     "pick": (cmd_pick, 0, True),
     "claim": (cmd_claim, 0, True),
     "release": (cmd_release, 2, False),

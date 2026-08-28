@@ -15,12 +15,20 @@ works, whether review is finished — all of that was decided before the `Approv
 on. Its whole job is to land the PR cleanly, or to refuse and say exactly why. It never edits
 repo code, never pushes to a branch, and never resolves a conflict.
 
-All Trello access goes through `scripts/trello.py` (a symlink to the shared
-`.claude/scripts/trello.py`, used by every phase skill). It loads `~/.trello.env` itself.
-**Never print `TRELLO_TOKEN`.**
+**Read `PIPELINE.md` (next to this file) before your first `claim`.** It carries the rules
+every phase on this board shares: the board model, the two lists that are Max's, the helper
+and its commands, the claim/lock protocol, and how a phase ends. This file carries only what
+is specific to the merge phase.
 
-**Always pass `--phase merge`.** The flag is what makes the script look for `Approved` cards;
-without it you get the spec phase's view of the board.
+## This phase
+
+| | |
+|---|---|
+| **Flag** | **`--phase merge`** on every queue command — without it you get the spec phase's view |
+| **Claims** | `Ready` cards carrying `Approved` |
+| **Produces** | **no label.** There is no `Merged` label; landing in `Done` is the record |
+| **Sentinel** | none — this phase has no questionnaires and no rounds |
+| **Writes** | nothing in the repo. It merges, syncs `main`, and deletes branches and worktrees |
 
 ```
 REPO=/Users/maxheimbrock/dev/learning/switchboard
@@ -28,18 +36,10 @@ T="$REPO/.claude/skills/merge-card/scripts/trello.py"
 
 "$T" --phase merge claim        # claim the next approved card — START HERE
 "$T" release <id> <nonce>       # drop the claim when you stop
-"$T" --phase merge pick         # read-only peek, claims nothing
-"$T" card <id>                  # name, desc, list, labels
 "$T" --phase merge comments <id># the card's comment thread
 "$T" post-comment <id> <file>   # post a comment from a file
-"$T" move <id> "Done"           # Backlog|Ready|In Progress|In Review|Done
+"$T" move <id> "Done"
 ```
-
-Write comment bodies to files in the scratchpad first, then pass the path. Never build them
-as inline shell strings — the text is markdown with newlines and quotes.
-
-This skill applies **no label**. There is no `Merged` label; landing in `Done` is the record.
-`"$T" label` refuses `Approved` outright — see below.
 
 ## The `Approved` label
 
@@ -47,7 +47,7 @@ This skill applies **no label**. There is no `Merged` label; landing in `Done` i
 `Spec`, `Plan` and `PR` are stamped by the skill that produced them; `Approved` is the human
 gate in front of the merge. He adds it in Trello while the card is in `In Review`, once he has
 tested the PR and is happy for it to land — then moves the card to `Ready`, which is what
-hands it to this skill.
+hands it to this skill. `"$T" label` refuses `Approved` outright.
 
 It routes as well as gates. `phase_of` takes the **furthest** label in pipeline order
 (`Spec` → `Plan` → `PR` → `Approved`), so an approved card no longer reads as a `PR` card and
@@ -58,24 +58,9 @@ the same `Ready` card:
 |---|---|
 | `Plan` | build-card — first build |
 | `PR` | build-card — another revision round on the same branch |
-| `PR` + `Approved` | **this skill** — merge it |
+| `Approved` | **this skill** |
 
-So the two moves that route a reviewed card are both Max's, and they are opposites:
-
-- **Add `Approved`, move to `Ready`** → merge it.
-- **Leave `Approved` off, move to `Ready`** → another build round.
-
-If an approved card turns out to need more work after all — a conflict, a late review comment,
-a failing check — **Max removes the `Approved` label** and it falls back into build-card's
-queue. Never add or remove `Approved` yourself; `trello.py label` will refuse it, and doing it
-by API instead would be a skill granting itself permission to merge.
-
-## Board conventions
-
-- **List = who holds the baton.** `Backlog` unpicked · `In Progress` an agent is working ·
-  `In Review` waiting on Max · `Ready` groomed, next agent's turn · `Done` shipped.
-- **Label = the last phase *completed*.** No label → spec-card. `Spec` → plan-card. `Plan` or
-  `PR` → build-card. `Approved` → **this skill**.
+Removing `Approved` is how Max hands a card back to build-card. That is his move, never yours.
 
 ## The loop
 
@@ -91,28 +76,14 @@ doesn't; there is nothing to ask about that a bracketed default could answer. `c
 reports `mode` and `revision` because every phase shares one helper — **ignore both fields
 here.** `mode` is always `new`.
 
-### Claiming — always start with `claim`, never `pick`
+### Claiming
 
-`pick` is read-only, for peeking at the queue. It is **not** safe to act on: reading the card
-and moving it are two round trips, so two agents can both read the same `Ready` card before
-either moves it. Switchboard runs multiple sessions and fires scheduled tasks, so the race is
-real — and here the loser would try to merge a PR the winner has already merged and deleted
-the branch of.
+The claim/lock protocol is in `PIPELINE.md §4` — always `claim`, never act on `pick`. The
+stake here is the highest on the board: **the loser of the race would try to merge a PR the
+winner has already merged and deleted the branch of.** Never work a card you did not win.
 
-`claim` closes it: it posts a lock comment first, re-reads the thread, and only proceeds if its
-own lock is the oldest live one. The loser reports `{"card": null}`. A claim gives you a `lock`
-nonce — **release it before you stop, in the same run**:
-
-```
-"$T" release <id> <nonce>
-```
-
-Release *before* the final `move`, so the card is never sitting in a queue-eligible list with a
-stale lock on it. Locks older than 15 minutes are reaped; a merge run is normally far shorter
-than that, and `release` failing with "no lock … (already released?)" is a non-event.
-
-Only `Ready` cards are ever picked up. A card in `In Review` belongs to Max however long it
-sits there, and an `Approved` card parked in `Backlog` was parked deliberately.
+A merge run is normally far shorter than the 15-minute lock reaper, and `release` failing
+with `no lock … (already released?)` is a non-event.
 
 ## Find the PR
 
@@ -321,9 +292,12 @@ Leave `Approved` on and move the card back to Ready once the checks are green.
 
 ## Never
 
-- Print `TRELLO_TOKEN`, or paste a URL containing it into output.
+`PIPELINE.md §9` applies in full. In particular, and specific to this phase:
+
 - Run any `trello.py` queue command without `--phase merge`.
 - Add or remove the `Approved` label. It is Max's gate; the helper refuses it for a reason.
+- Act on a card in `In Review`, or move a card out of `In Review` — that is Max's move.
+- Print `TRELLO_TOKEN`, or paste a URL containing it into output.
 - Merge a PR with a failing or still-running check, a conflict, or changes requested.
 - Read `gh pr checks`' exit code as a verdict — it is `1` for a PR with no checks at all.
 - Merge anything other than the one PR that matches the claimed card.
@@ -335,5 +309,4 @@ Leave `Approved` on and move the card back to Ready once the checks are green.
 - `git checkout`, rebase, reset, force-push or stash in the main checkout, or fast-forward
   `main` past commits Max has only locally.
 - Move a card to `Done` without a confirmed `MERGED` state on its PR.
-- Act on a card in `In Review`, or move a card out of `In Review` — that is Max's move.
-- Touch cards on any board but Switchboard, or cards without the `Approved` label.
+- Touch cards without the `Approved` label.

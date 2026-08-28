@@ -11,3 +11,5 @@ public/codemirror-bundle.js
 .cache/
 dev-app-update.yml
 .claude/worktrees/
+__pycache__/
+*.pyc

@@ -23,12 +23,20 @@ makes from `In Review`.
 This is the only phase that writes repo code. The spec said *what*, the plan said *how* —
 this skill does it and proves it works. It does not re-decide either.
 
-All Trello access goes through `scripts/trello.py` (a symlink to the shared
-`.claude/scripts/trello.py`, used by every phase skill). It loads `~/.trello.env` itself.
-**Never print `TRELLO_TOKEN`.**
+**Read `PIPELINE.md` (next to this file) before your first `claim`.** It carries the rules
+every phase on this board shares: the board model, the two lists that are Max's, the helper
+and its commands, the claim/lock protocol, questionnaire mechanics, and how a phase ends.
+This file carries only what is specific to the build phase.
 
-**Always pass `--phase pr`.** The flag is what makes the script look for `Plan` cards and read
-`Build-me` questionnaires; without it you get the spec phase's view of the board.
+## This phase
+
+| | |
+|---|---|
+| **Flag** | **`--phase pr`** on every queue command — without it you get the spec phase's view |
+| **Claims** | `Ready` cards carrying `Plan` (first build) or `PR` (revision), and not `Approved` |
+| **Produces** | the `PR` label and a **draft** PR, then `In Review` for Max |
+| **Sentinel** | `🔨 Build-me round N — M questions` — the escape hatch only, not the normal path |
+| **Writes** | **repo code**, on a branch in its own worktree. Never the card description. |
 
 Once you enter the worktree the session's working directory changes, so call the script by
 its **absolute path** from that point on:
@@ -39,36 +47,22 @@ T="$REPO/.claude/skills/build-card/scripts/trello.py"
 
 "$T" --phase pr claim           # claim the next card — START HERE
 "$T" release <id> <nonce>       # drop the claim when you stop
-"$T" --phase pr pick            # read-only peek, claims nothing
-"$T" card <id>                  # name, desc, list, labels
 "$T" --phase pr comments <id>   # thread + questionnaire/answer split
 "$T" post-comment <id> <file>   # post a comment from a file
-"$T" set-desc <id> <file>       # replace the description
-"$T" move <id> "In Review"      # Backlog|Ready|In Progress|In Review|Done
-"$T" label <id> PR              # Spec|Plan|PR
+"$T" move <id> "In Review"
+"$T" label <id> PR
 ```
 
-Write comment and description bodies to files in the scratchpad first, then pass the path.
-Never build them as inline shell strings — the text is markdown with newlines and quotes.
+### This is the one phase that loops
 
-## Board conventions
+It accepts its own output label, because implementation is the only step that repeats:
+`Plan` in `Ready` is a first build, `PR` in `Ready` is a revision round on the same branch
+and the same PR. Everywhere else in the pipeline `PR` means hands off.
 
-- **List = who holds the baton.** `Backlog` unpicked · `In Progress` an agent is working ·
-  `In Review` waiting on Max · `Ready` groomed, next agent's turn · `Done` shipped.
-- **Label = the last phase *completed*.** No label → spec-card's turn. `Spec` → plan-card's
-  turn. `Plan` → **this skill's turn**. `PR` → a PR is open; **also this skill's turn**, but
-  only once Max has moved the card back to `Ready`. `Approved` → Max has signed the PR off;
-  the card is merge-card's and is no longer yours.
-
-This is the one phase that accepts its own output label, because implementation is the only
-step that loops: `Plan` in `Ready` is a first build, `PR` in `Ready` is a revision round.
-Everywhere else in the pipeline `PR` means hands off. `claim --phase pr` enforces the list and
-the labels, and never picks a `PR` card out of `In Review`.
-
-An `Approved` card is not yours either, even sitting in `Ready` with a `PR` label under it.
-`phase_of` reads the **furthest** label, so approving a card lifts it out of this queue
-automatically — `claim` will walk straight past it. That is the mechanism that keeps this skill
-and merge-card off each other's cards, and it is why you must never add or remove `Approved`
+An `Approved` card is **not yours**, even sitting in `Ready` with a `PR` label under it.
+`phase_of` reads the furthest label, so approving a card lifts it out of this queue
+automatically — `claim` walks straight past it. That mechanism is what keeps this skill and
+merge-card off each other's cards, and it is why you must never add or remove `Approved`
 yourself.
 
 ## The loop
@@ -113,45 +107,24 @@ are history to this phase and are never read as an answer.
 
 ### The trigger is strict — never jump the gun
 
-**Only `Ready` cards are ever picked up**, carrying `Plan` or `PR`. A card in `In Review`
-belongs to Max, however long it sits and however many comments appear on it.
+`Ready` only, carrying `Plan` or `PR` (see `PIPELINE.md §2`). **This matters more here than
+anywhere else in the pipeline**, because a `PR` card in `In Review` is busy collecting
+exactly the review feedback you would act on, and starting early looks helpful. Don't. He may
+still be testing, a colleague may not have finished reviewing, and he decides which comments
+survive. Moving it to `Ready` is his signal that the round is complete — a new PR comment is
+not.
 
-This matters more here than anywhere else in the pipeline, because a `PR` card in `In Review` is
-busy collecting exactly the review feedback you would act on, and starting early looks helpful.
-Don't. He may still be testing, a colleague may not have finished reviewing, and he decides
-which comments survive. Moving it to `Ready` is his signal that the round is complete. Do not
-poll `In Review`, do not act on a new PR comment, do not move it out yourself. A `Plan` or `PR`
-card parked in `Backlog` was parked deliberately.
+### Claiming
 
-### Claiming — always start with `claim`, never `pick`
+The claim/lock protocol is in `PIPELINE.md §4` — always `claim`, never act on `pick`. Two
+things are sharper here than elsewhere:
 
-`pick` is read-only, for peeking at the queue. It is **not** safe to act on: reading the card
-and moving it are two round trips, so two agents can both read the same `Ready` card before
-either moves it. Switchboard runs multiple sessions and fires scheduled tasks, so this race is
-real — and here the loser would open a duplicate PR, not merely duplicate a comment.
-
-`claim` closes it. It posts a lock comment *first*, re-reads the thread, and only proceeds if
-its own lock is the oldest live one. The loser withdraws and reports `{"card": null}`. Locks
-are phase-independent: a card being built cannot also be specced.
-
-A claim gives you a `lock` nonce. **Release it before you stop**, in the same run:
-
-```
-"$T" release <id> <nonce>
-```
-
-Release *before* the final `move` out of `In Progress`, so the card is never sitting in a
-queue-eligible list with a stale lock on it. A lock left by a crashed run is reaped after 15
-minutes, so a dropped release costs a delay, not a wedged card.
-
-`claim` also moves the card to `In Progress` and skips any card holding a live lock. Never
-hand-move a card into `In Progress` to fake a claim, and never leave one parked there.
-
-**A build outlives the 15-minute lock reaper.** That is expected and safe: the card is sitting
-in `In Progress`, which no phase's queue scans, so nothing else will pick it up. Do not
-re-claim mid-run, and do not shorten the work to beat the timer. Just release at the end —
-`release` failing with "no lock … (already released?)" because the reaper got there first is a
-non-event; carry on and finish the card.
+- **The loser of the race would open a duplicate PR** on a review already in progress, not
+  merely duplicate a comment. Never work a card you did not win.
+- **A build outlives the 15-minute lock reaper.** That is expected and safe: the card sits in
+  `In Progress`, which no phase's queue scans, so nothing else picks it up. Do not re-claim
+  mid-run and do not shorten the work to beat the timer. Release at the end; `release`
+  failing with `no lock … (already released?)` is a non-event — carry on and finish the card.
 
 ## Revision rounds — a card that comes back carrying `PR`
 
@@ -385,6 +358,12 @@ ticks them off in the PR as he does each manual pass.
 
 Trello: <card shortUrl>
 
+## Run it
+
+```
+npm --prefix ~/dev/learning/switchboard/.claude/worktrees/<SLUG> run electron-dev
+```
+
 ## Verification
 Ticked = run by me and passing. Unticked = needs you at a GUI; I have not run it.
 
@@ -395,6 +374,14 @@ Ticked = run by me and passing. Unticked = needs you at a GUI; I have not run it
 ## Deviations from the plan
 - <each one, and why. Omit the section if there were none.>
 ```
+
+The `## Run it` command is mandatory on every PR, every round. The manual checklist items all
+need Max at a running app, and the worktree lives at a path he has not typed and would otherwise
+have to reconstruct — so hand him the exact line to copy. Substitute this card's `SLUG` into it
+literally (the worktree directory is the slug, not the branch, so no `feat/` prefix), keep the
+`~` form rather than expanding `/Users/maxheimbrock`, and use `electron-dev` — it runs against
+`~/.switchboard-dev`, so poking at the branch cannot disturb his real data. Put it in a fenced
+block on its own line so GitHub gives him a copy button.
 
 Every line of the plan's `**Verification**` block appears here, none dropped and none reworded
 — it is the spec's acceptance criteria in disguise, and a check that goes missing from the list
@@ -422,6 +409,8 @@ Rules for the updated checklist:
   worse than an empty box, because he has already stopped looking at it.
 - Add an item for anything this round's feedback introduced.
 - Re-run every automated check and update its result. They are cheap; assume nothing carries over.
+- Keep the `## Run it` command in the body, pointing at this card's worktree. If the worktree had
+  to be recreated at a different path this round, correct the line rather than leaving a stale one.
 
 The PR keeps its number and URL, stays a draft, and stays open.
 
@@ -482,18 +471,20 @@ re-litigate a `## Decisions` entry or re-open the spec.
 
 ## Never
 
-- Print `TRELLO_TOKEN`, or paste a URL containing it into output.
+`PIPELINE.md §9` applies in full. In particular, and specific to this phase:
+
 - Run any `trello.py` queue command without `--phase pr`.
+- Act on PR feedback while the card is still in `In Review`. Wait for Max to move it to `Ready`.
+- Move a card out of `In Review` — that is Max's move.
+- Add or remove the `Approved` label. Approving is Max's; merging and closing the card out
+  are merge-card's.
+- Print `TRELLO_TOKEN`, or paste a URL containing it into output.
 - Commit to `main`, push `main`, or `git checkout` in the main checkout. Everything happens in
   the worktree.
 - Open a non-draft PR, mark one ready for review, merge one, or push to someone else's branch.
 - Open a second PR for a card that already has one, or run a revision round on a fresh branch.
-- Act on PR feedback while the card is still in `In Review`. Wait for Max to move it to `Ready`.
 - Drop a piece of review feedback without either a code change or a reply saying why not.
 - Tick a checklist item you did not run, or drop one from the plan's Verification block.
-- Edit the card description, or delete/edit any comment other than a lock comment.
-- Move a card out of `In Review` — that is Max's move.
-- Move a card to `Done`, or add or remove the `Approved` label. Approving is Max's; merging
-  and closing the card out are merge-card's.
-- Touch cards on any board but Switchboard, cards carrying neither `Plan` nor `PR`, or cards
-  carrying `Approved`.
+- Open or update a PR whose body is missing the `## Run it` command for this card's worktree.
+- Edit the card description — `## Spec` and `## Plan` are the record, the PR is the review.
+- Touch cards carrying neither `Plan` nor `PR`, or cards carrying `Approved`.

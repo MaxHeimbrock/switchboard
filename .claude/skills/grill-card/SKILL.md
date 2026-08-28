@@ -10,8 +10,13 @@ Converts a one-line Trello card into a spec Max has actually agreed to, by askin
 questions **as comments on the card** and reading his answers back from the same card.
 The card description becomes the spec document; the comment thread is the transcript.
 
-All Trello access goes through `scripts/trello.py` (run it from the skill directory, or
-by absolute path). It loads `~/.trello.env` itself. **Never print `TRELLO_TOKEN`.**
+All Trello access goes through `scripts/trello.py` — a symlink to the shared
+`.claude/scripts/trello.py` that every phase skill uses. Run it from the skill directory or
+by absolute path; it loads `~/.trello.env` itself. **Never print `TRELLO_TOKEN`.**
+
+The script takes a `--phase` flag selecting which phase of the pipeline it works on. It
+defaults to `spec`, which is this skill's phase, so every command below is written without
+it. Pass `--phase plan` only if you are deliberately inspecting plan-card's queue.
 
 ```
 ./scripts/trello.py claim                     # claim the next card — START HERE
@@ -32,7 +37,7 @@ Never build them as inline shell strings — the text is markdown with newlines 
 
 - **List = who holds the baton.** `Backlog` unpicked · `In Progress` an agent is working ·
   `In Review` waiting on Max · `Ready` groomed, next agent's turn · `Done` shipped.
-- **Label = the last phase *completed*.** `Spec` → plan skill's turn. `Plan` → implement
+- **Label = the last phase *completed*.** `Spec` → plan-card's turn. `Plan` → implement
   skill's turn. `PR` → open for review. No label → this skill's turn.
 
 So a card is this skill's only when it carries **none** of those labels. `pick` enforces this.
@@ -46,7 +51,7 @@ So a card is this skill's only when it carries **none** of those labels. `pick` 
 | 3 | `In Review` | **Max** | Answers in a comment, then **moves the card to `Ready` himself** |
 | 4 | `Ready`, no label | this skill | `claim` it (auto-moves to `In Progress`), read answers, update the spec |
 | 5 | `In Progress` | this skill | Questions still open → go to step 2 (round *n+1*). None → final spec, add `Spec` label, move to `Ready`, stop |
-| 6 | `Ready` + `Spec` | plan skill | Not this skill's card any more |
+| 6 | `Ready` + `Spec` | plan-card | Not this skill's card any more |
 
 ### What `claim` hands you
 

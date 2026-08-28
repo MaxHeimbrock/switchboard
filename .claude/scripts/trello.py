@@ -17,6 +17,10 @@ The pr phase accepts its own output label as well as its input one: a card Max h
 reviewed and moved back to Ready carries PR already, and comes round again for
 another pass on the same branch. `pick`/`claim` report that as "revision": true.
 
+Every phase draws from Ready only. Backlog is Max's staging area: a card leaves it
+because he decided it is worth working on and dragged it to Ready, never because a
+skill picked it up.
+
 Approved is the one label no skill applies - Max adds it by hand in In Review once
 he has tested the PR and is happy for it to land. Because phase_of takes the
 FURTHEST label in pipeline order, approving a card also lifts it out of the pr
@@ -78,9 +82,10 @@ PHASES = {
         "requires": (None,),
         "produces": "Spec",
         "sentinel": "Spec-me round",
-        # Backlog is in scope only for the first phase - a card parked there with a
-        # phase label already on it was parked deliberately.
-        "lists": ("Ready", "Backlog"),
+        # Ready only, like every other phase. Backlog is Max's staging area: a card
+        # sits there until HE decides it is worth speccing and drags it to Ready.
+        # No skill may take that decision for him, so Backlog is never scanned.
+        "lists": ("Ready",),
     },
     "plan": {
         "requires": ("Spec",),

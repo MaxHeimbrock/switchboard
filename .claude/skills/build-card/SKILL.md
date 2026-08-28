@@ -53,8 +53,9 @@ Never build them as inline shell strings — the text is markdown with newlines 
 
 ## Board conventions
 
-- **List = who holds the baton.** `Backlog` unpicked · `In Progress` an agent is working ·
-  `In Review` waiting on Max · `Ready` groomed, next agent's turn · `Done` shipped.
+- **List = who holds the baton.** `Backlog` **Max's** — never picked by any skill ·
+  `Ready` Max has released it, next agent's turn · `In Progress` an agent is working ·
+  `In Review` waiting on Max · `Done` shipped.
 - **Label = the last phase *completed*.** No label → spec-card's turn. `Spec` → plan-card's
   turn. `Plan` → **this skill's turn**. `PR` → a PR is open; **also this skill's turn**, but
   only once Max has moved the card back to `Ready`. `Approved` → Max has signed the PR off;

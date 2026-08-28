@@ -1,6 +1,6 @@
 ---
 name: spec-card
-description: Turn a rough Trello card into an agreed spec by putting questions to Max on the card itself. Use when asked to spec a backlog card, run a spec-me session, pick up the next card to spec, or read back answers left on a Trello card. Operates on the Switchboard board only.
+description: Turn a rough Trello card into an agreed spec by putting questions to Max on the card itself. Use when asked to spec a card Max has moved to Ready, run a spec-me session, pick up the next card to spec, or read back answers left on a Trello card. Never picks from Backlog. Operates on the Switchboard board only.
 allowed-tools: Bash, Read, Grep, Glob
 ---
 
@@ -35,8 +35,9 @@ Never build them as inline shell strings — the text is markdown with newlines 
 
 ## Board conventions
 
-- **List = who holds the baton.** `Backlog` unpicked · `In Progress` an agent is working ·
-  `In Review` waiting on Max · `Ready` groomed, next agent's turn · `Done` shipped.
+- **List = who holds the baton.** `Backlog` **Max's** — never picked by any skill ·
+  `Ready` Max has released it, next agent's turn · `In Progress` an agent is working ·
+  `In Review` waiting on Max · `Done` shipped.
 - **Label = the last phase *completed*.** `Spec` → plan-card's turn. `Plan` →
   build-card's turn. `PR` → open for review. No label → this skill's turn.
 
@@ -46,32 +47,42 @@ So a card is this skill's only when it carries **none** of those labels. `pick` 
 
 | # | Card at | Who | Action |
 |---|---|---|---|
-| 1 | `Backlog`, no label | this skill | Pick topmost → move to `In Progress` |
+| 0 | `Backlog`, no label | **Max** | Decides the idea is worth speccing and **moves it to `Ready` himself** |
+| 1 | `Ready`, no label | this skill | `claim` it (auto-moves to `In Progress`) |
 | 2 | `In Progress` | this skill | Seed description, post round-1 questions → move to `In Review` |
 | 3 | `In Review` | **Max** | Answers in a comment, then **moves the card to `Ready` himself** |
-| 4 | `Ready`, no label | this skill | `claim` it (auto-moves to `In Progress`), read answers, update the spec |
+| 4 | `Ready`, no label | this skill | `claim` it again (auto-moves to `In Progress`), read answers, update the spec |
 | 5 | `In Progress` | this skill | Questions still open → go to step 2 (round *n+1*). None → final spec, add `Spec` label, move to `Ready`, stop |
 | 6 | `Ready` + `Spec` | plan-card | Not this skill's card any more |
 
 ### What `claim` hands you
 
 Both `claim` and `pick` report a `mode` derived from the **comment thread**, not from the
-list — Max may drop a card straight into `Ready` that was never specced. Act on the mode,
-not on the list:
+list — every card arrives from `Ready`, whether it is starting round 1 or coming back with
+answers. Act on the mode, not on the list:
 
 | mode | Means | Do |
 |---|---|---|
-| `new` | No questionnaire on the card yet | Post round 1 (step 2), wherever the card sat |
+| `new` | No questionnaire on the card yet | Post round 1 (step 2) |
 | `resume` | Answers arrived since round *N* | Fold them in (step 4) |
 | `stalled` | Round *N* posted, no answers since | Max moved it without answering — see below |
 
 ### The trigger is strict — never jump the gun
 
-**Only `Backlog` and `Ready` cards are ever picked up.** A card in `In Review` belongs to
-Max, however long it sits there and however many comments appear on it. Moving it to
-`Ready` is Max's deliberate signal that the review round is finished; that decision is his
-alone. Do not poll `In Review`, do not act on a new comment there, do not move it out
-yourself.
+**Only `Ready` cards are ever picked up.** `claim` scans that one list and nothing else.
+
+**`Backlog` is Max's alone.** It is where raw ideas sit until he judges one worth building.
+A card leaves it only when he drags it to `Ready` himself — that drag *is* the go-ahead to
+spec it. Never pick, claim, read-for-work, or move a `Backlog` card, however obvious or
+long-parked it looks, and never suggest speccing one as a way to fill an empty queue. If
+`Ready` holds nothing this skill owns, `claim` reports `{"card": null}` and you stop:
+an empty queue means Max has released nothing, which is the correct outcome, not a
+problem to route around.
+
+A card in `In Review` likewise belongs to Max, however long it sits there and however many
+comments appear on it. Moving it to `Ready` is his deliberate signal that the review round
+is finished; that decision is his alone. Do not poll `In Review`, do not act on a new
+comment there, do not move it out yourself.
 
 ### Claiming — always start with `claim`, never `pick`
 
@@ -224,6 +235,7 @@ Then stop. The card is the plan skill's.
 
 - Print `TRELLO_TOKEN`, or paste a URL containing it into output.
 - Delete or edit any comment other than a lock comment (`claim` / `release` own those).
+- Pick up, claim, or move a card in `Backlog` — releasing one to `Ready` is Max's call alone.
 - Move a card out of `In Review` — that is Max's move and the whole point of the loop.
 - Move a card to `Done`.
 - Touch cards on any board but Switchboard, or cards carrying `Spec` / `Plan` / `PR`.

@@ -2581,6 +2581,14 @@ body { display: flex; flex-direction: column; }
   color: #e0a030;
 }
 
+.memory-skill-icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  margin-top: 5px;
+  color: #c8b0e0;
+}
+
 .schedule-play-btn {
   flex-shrink: 0;
   background: transparent;

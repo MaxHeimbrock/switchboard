@@ -38,6 +38,7 @@ const cleanPtyEnv = Object.fromEntries(
 const { discoverShellProfiles, getShellProfiles, resolveShell, isWindows, isWslShell, windowsToWslPath, shellArgs, quoteArgvForShell } = require('./shell-profiles');
 const { startScheduler } = require('./schedule-runner');
 const { encodeProjectPath } = require('./encode-project-path');
+const { skillDisplayName } = require('./skill-name');
 
 
 // --- Auto-updater (only in packaged builds) ---
@@ -743,6 +744,33 @@ ipcMain.handle('get-memories', () => {
               seenPaths.add(f.filePath);
             }
           }
+
+          // 4. {projectPath}/.claude/skills/<folder>/SKILL.md — one row per skill.
+          // Not scanMdFiles: skills live a level deeper, only SKILL.md counts, and that
+          // file (or its folder) may be a symlink, which scanMdFiles' isFile() drops.
+          const skillsDir = path.join(dotClaudeDir, 'skills');
+          try {
+            const skillDirs = fs.readdirSync(skillsDir, { withFileTypes: true })
+              .filter(d => d.isDirectory() || d.isSymbolicLink());
+            for (const d of skillDirs) {
+              const fp = path.join(skillsDir, d.name, 'SKILL.md');
+              try {
+                if (!fs.existsSync(fp) || seenPaths.has(fp)) continue;
+                const content = fs.readFileSync(fp, 'utf8');
+                if (!content.trim()) continue;
+                const stat = fs.statSync(fp);
+                files.push({
+                  filename: 'SKILL.md',
+                  displayName: skillDisplayName(content, d.name),
+                  filePath: fp,
+                  modified: stat.mtime.toISOString(),
+                  displayPath: shortName + '/.claude/skills/' + d.name + '/',
+                  source: 'skill',
+                });
+                seenPaths.add(fp);
+              } catch {}
+            }
+          } catch {}
         }
 
         if (files.length > 0) {
@@ -772,7 +800,7 @@ ipcMain.handle('get-memories', () => {
     ];
     upsertSearchEntries(allFiles.map(f => ({
       id: f.filePath, type: 'memory', folder: null,
-      title: f.label + ' ' + f.filename,
+      title: f.label + ' ' + (f.displayName || f.filename),
       body: fs.readFileSync(f.filePath, 'utf8'),
     })));
   } catch {}

@@ -1,10 +1,10 @@
 ---
-name: grill-card
-description: Turn a rough Trello card into an agreed spec by grilling Max with questions on the card itself. Use when asked to spec a backlog card, run a grill-me session, pick up the next card to spec, or read back answers left on a Trello card. Operates on the Switchboard board only.
+name: spec-card
+description: Turn a rough Trello card into an agreed spec by putting questions to Max on the card itself. Use when asked to spec a backlog card, run a spec-me session, pick up the next card to spec, or read back answers left on a Trello card. Operates on the Switchboard board only.
 allowed-tools: Bash, Read, Grep, Glob
 ---
 
-# Grill a card into a spec
+# Spec a card
 
 Converts a one-line Trello card into a spec Max has actually agreed to, by asking
 questions **as comments on the card** and reading his answers back from the same card.
@@ -56,7 +56,7 @@ So a card is this skill's only when it carries **none** of those labels. `pick` 
 ### What `claim` hands you
 
 Both `claim` and `pick` report a `mode` derived from the **comment thread**, not from the
-list — Max may drop a card straight into `Ready` that was never grilled. Act on the mode,
+list — Max may drop a card straight into `Ready` that was never specced. Act on the mode,
 not on the list:
 
 | mode | Means | Do |
@@ -128,21 +128,21 @@ Only `deferred` and `ambiguous` answers, plus genuinely new questions his answer
 carry into the next round. Everything else is settled. In practice most cards finish in one
 round, and a second round should be one or two questions, not another six.
 
-**Cap: 3 rounds.** At round 3, stop grilling and write the spec from what is decided,
+**Cap: 3 rounds.** At round 3, stop asking and write the spec from what is decided,
 listing whatever is still unresolved under a `## Risks` heading in the description and
 calling it out in the closing comment. An endless questionnaire is worse than a spec with
 two stated unknowns — the plan skill can raise them again with a concrete plan in hand.
 
 ## Comment format
 
-Every questionnaire comment's **first line must be** `🔍 Grill-me round N — M questions`.
+Every questionnaire comment's **first line must be** `🔍 Spec-me round N — M questions`.
 The helper detects rounds by that prefix, and this is load-bearing: the API token acts as
 Max himself, so comments this skill posts are attributed to *him*. Authorship cannot
 separate questions from answers — only the sentinel can. A questionnaire without it is
 invisible to the next run, and its answers will never be found.
 
 ```
-🔍 Grill-me round 1 — 5 questions
+🔍 Spec-me round 1 — 5 questions
 
 Reply in one comment. Number your answers; skip any you don't care about and I'll
 take the assumption in brackets. Then move the card to Ready.

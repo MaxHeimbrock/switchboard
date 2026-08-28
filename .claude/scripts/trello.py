@@ -6,9 +6,9 @@ Credentials are read from ~/.trello.env (TRELLO_KEY / TRELLO_TOKEN) and never pr
 The board runs one card through three phases, each owned by a different skill. A
 phase is defined by the label it REQUIRES on a card (the last phase completed) and
 the label it PRODUCES when it finishes. Pass --phase before the subcommand; it
-defaults to `spec` so grill-card's existing invocations keep working unchanged.
+defaults to `spec` so spec-card's existing invocations keep working unchanged.
 
-  --phase spec   no phase label  -> Spec    (grill-card)
+  --phase spec   no phase label  -> Spec    (spec-card)
   --phase plan   Spec            -> Plan    (plan-card)
   --phase pr     Plan            -> PR      (not written yet)
 
@@ -54,7 +54,7 @@ PHASES = {
     "spec": {
         "requires": None,
         "produces": "Spec",
-        "sentinel": "Grill-me round",
+        "sentinel": "Spec-me round",
         # Backlog is in scope only for the first phase - a card parked there with a
         # phase label already on it was parked deliberately.
         "lists": ("Ready", "Backlog"),
@@ -78,7 +78,7 @@ DEFAULT_PHASE = "spec"
 # are two round trips: without it, two agents both read the same Ready card
 # before either moves it. Trello has no compare-and-swap, but comments are
 # append-only with server timestamps, so the oldest live lock wins. Locks are
-# phase-independent on purpose: a card being planned must not also be grilled.
+# phase-independent on purpose: a card being planned must not also be specced.
 LOCK = re.compile(r"^lock ([0-9a-f]{12})\b", re.IGNORECASE)
 LOCK_PREFIX = "\U0001F512 lock "
 STALE_LOCK_SECONDS = 900  # a crashed run must not wedge a card forever

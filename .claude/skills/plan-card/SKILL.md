@@ -11,14 +11,14 @@ writes the implementation plan into a `## Plan` section of the same card descrip
 Mechanism is this skill's job — the spec says *what* and *why*, the plan says *how*.
 
 Most cards should finish in one pass with no questions. Questions exist for the choices
-the spec deliberately left open, not as a second grilling.
+the spec deliberately left open, not as a second spec round.
 
 All Trello access goes through `scripts/trello.py` (a symlink to the shared
 `.claude/scripts/trello.py`, used by every phase skill). Run it from the skill directory or
 by absolute path; it loads `~/.trello.env` itself. **Never print `TRELLO_TOKEN`.**
 
 **Always pass `--phase plan`.** The flag is what makes the script look for `Spec` cards and
-read `Plan-me` questionnaires; without it you get the grill phase's view of the board.
+read `Plan-me` questionnaires; without it you get the spec phase's view of the board.
 
 ```
 ./scripts/trello.py --phase plan claim         # claim the next card — START HERE
@@ -39,7 +39,7 @@ Never build them as inline shell strings — the text is markdown with newlines 
 
 - **List = who holds the baton.** `Backlog` unpicked · `In Progress` an agent is working ·
   `In Review` waiting on Max · `Ready` groomed, next agent's turn · `Done` shipped.
-- **Label = the last phase *completed*.** No label → grill-card's turn. `Spec` → **this
+- **Label = the last phase *completed*.** No label → spec-card's turn. `Spec` → **this
   skill's turn**. `Plan` → implement skill's turn. `PR` → open for review.
 
 So a card is this skill's only when it carries `Spec` and **not** `Plan` or `PR`, and only
@@ -67,7 +67,7 @@ that has never been planned. Act on the mode:
 | `resume` | Answers arrived since round *N* | Fold them in (step 5) |
 | `stalled` | Round *N* posted, no answers since | Max moved it without answering — see below |
 
-Only `Plan-me` comments count. The whole grill-me thread above them is just history to this
+Only `Plan-me` comments count. The whole `Spec-me` thread above them is just history to this
 phase, and is never read as an answer.
 
 ### The trigger is strict — never jump the gun
@@ -87,7 +87,7 @@ this race is real.
 
 `claim` closes it. It posts a lock comment *first*, re-reads the thread, and only proceeds
 if its own lock is the oldest live one. The loser withdraws its lock and reports
-`{"card": null}`. Locks are phase-independent: a card being planned cannot also be grilled.
+`{"card": null}`. Locks are phase-independent: a card being planned cannot also be specced.
 
 A claim gives you a `lock` nonce. **Release it before you stop**, in the same run:
 
@@ -112,7 +112,7 @@ A plan that names a file that does not exist is worse than no plan: the implemen
 follow it. Before writing a single step:
 
 1. Read the whole card description — `## Spec` is the contract, `## Decisions` are settled
-   and must not be re-opened, `## Risks` is a direct message from grill-card to you.
+   and must not be re-opened, `## Risks` is a direct message from spec-card to you.
 2. Find the real code with `Grep`/`Glob`, then `Read` it. Follow the call chain end to end —
    the caller, the state it mutates, the consumers of that state.
 3. **Verify every path, symbol and line number you write down.** If you cite
@@ -155,7 +155,7 @@ The helper detects rounds by that prefix, and this is load-bearing: the API toke
 Max himself, so comments this skill posts are attributed to *him*. Authorship cannot
 separate questions from answers — only the sentinel can. A questionnaire without it is
 invisible to the next run, and its answers will never be found. It must say `Plan-me`, not
-`Grill-me` — a `Grill-me` sentinel makes the card look un-specced to the wrong skill.
+`Spec-me` — a `Spec-me` sentinel makes the card look un-specced to the wrong skill.
 
 ```
 🧭 Plan-me round 1 — 2 questions

@@ -44,8 +44,10 @@ its **absolute path** from that point on:
 ```
 REPO=/Users/maxheimbrock/dev/learning/switchboard
 T="$REPO/.claude/skills/build-card/scripts/trello.py"
+N="$REPO/.claude/skills/build-card/scripts/session-name.py"
 
 "$T" --phase pr claim           # claim the next card — START HERE
+"$N" pr "<name>" <run>          # rename the session — right after claim
 "$T" release <id> <nonce>       # drop the claim when you stop
 "$T" --phase pr comments <id>   # thread + questionnaire/answer split
 "$T" post-comment <id> <file>   # post a comment from a file
@@ -69,10 +71,10 @@ yourself.
 
 | # | Card at | Who | Action |
 |---|---|---|---|
-| 1 | `Ready` + `Plan` | this skill | `claim` topmost (auto-moves to `In Progress`) |
+| 1 | `Ready` + `Plan` | this skill | `claim` topmost (auto-moves to `In Progress`), then `session-name.py` — `PIPELINE.md §0` |
 | 2 | `In Progress` | this skill | Worktree → implement → verify → draft PR → label `PR`, move to `In Review` |
 | 3 | `In Review` + `PR` | **Max** | Tests it, gathers review comments. Then either adds `Approved` (→ merge-card, done here) or leaves it off and moves the card to `Ready` |
-| 4 | `Ready` + `PR`, no `Approved` | this skill | **Revision round** — `claim`, read the PR feedback, another pass on the same branch, back to `In Review` |
+| 4 | `Ready` + `PR`, no `Approved` | this skill | **Revision round** — `claim`, name the session (`run` will be 2 or more), read the PR feedback, another pass on the same branch, back to `In Review` |
 | 5 | — | | Steps 3–4 repeat for as many rounds as the review takes, until he approves |
 | — | `In Progress` | this skill | Escape hatch: plan unbuildable → round-*n* questions → `In Review`, no new label |
 

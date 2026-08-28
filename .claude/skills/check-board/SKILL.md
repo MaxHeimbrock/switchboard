@@ -14,14 +14,22 @@ owns it.
 Use this when Max has not named a phase ("check the board", "what's next", "pick something
 up"). When he names one ("spec this", "merge it"), go straight to that skill instead.
 
-## The one command
+## The two commands
 
 ```
+./scripts/session-name.py board "checking the queue"   # rename the session — FIRST
 ./scripts/trello.py survey
 ```
 
-A symlink to the shared `.claude/scripts/trello.py`. It loads `~/.trello.env` itself.
-**Never print `TRELLO_TOKEN`.** `survey` is phase-independent — no `--phase` flag.
+Both are symlinks to the shared scripts in `.claude/scripts/`. `trello.py` loads
+`~/.trello.env` itself — **never print `TRELLO_TOKEN`.** `survey` is phase-independent, so no
+`--phase` flag.
+
+`session-name.py` is `PIPELINE.md §0`, and this skill is the one case with no card to name
+itself after: it renames before the survey, with the tag `board` and no run number. The phase
+skill it dispatches to renames the session again over the top, to `[spec] <card>` and so on —
+that is the intended end state, and this name is only what the row reads while the survey
+runs or when the queue turns out to be empty.
 
 **Read `PIPELINE.md` (next to this file) for the board model** — what the lists and labels
 mean, and why `Backlog` and `In Review` are Max's. This file carries only the routing.
@@ -60,7 +68,7 @@ phase owns it. A card appearing in two buckets is a bug in the script, not a jud
 
 ## What to do
 
-1. Run `survey`.
+1. Rename the session, then run `survey`.
 2. **`next` is non-null** → invoke `next.skill` via the Skill tool, and let it run to
    completion. Nothing else: do not pre-read the card, claim it, or move it first.
 3. **`next` is null** → report the queue is empty and stop. See below.

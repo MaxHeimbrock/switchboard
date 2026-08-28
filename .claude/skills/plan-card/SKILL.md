@@ -30,6 +30,7 @@ This file carries only what is specific to the plan phase.
 
 ```
 ./scripts/trello.py --phase plan claim         # claim the next card — START HERE
+./scripts/session-name.py plan "<name>" <run>  # rename the session — right after claim
 ./scripts/trello.py release <id> <nonce>       # drop the claim when you stop
 ./scripts/trello.py --phase plan comments <id> # thread + questionnaire/answer split
 ./scripts/trello.py post-comment <id> <file>   # post a comment from a file
@@ -42,7 +43,7 @@ This file carries only what is specific to the plan phase.
 
 | # | Card at | Who | Action |
 |---|---|---|---|
-| 1 | `Ready` + `Spec` | this skill | `claim` topmost (auto-moves to `In Progress`) |
+| 1 | `Ready` + `Spec` | this skill | `claim` topmost (auto-moves to `In Progress`), then `session-name.py` — `PIPELINE.md §0` |
 | 2 | `In Progress` | this skill | Read spec + code. No questions → write plan, label `Plan`, move to `Ready`, done |
 | 3 | `In Progress` | this skill | Questions needed → write partial plan, post round-*n* questions → move to `In Review` |
 | 4 | `In Review` | **Max** | Answers in a comment, then **moves the card to `Ready` himself** |

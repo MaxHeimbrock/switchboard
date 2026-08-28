@@ -33,8 +33,10 @@ is specific to the merge phase.
 ```
 REPO=/Users/maxheimbrock/dev/learning/switchboard
 T="$REPO/.claude/skills/merge-card/scripts/trello.py"
+N="$REPO/.claude/skills/merge-card/scripts/session-name.py"
 
 "$T" --phase merge claim        # claim the next approved card — START HERE
+"$N" merge "<name>"             # rename the session — right after claim
 "$T" release <id> <nonce>       # drop the claim when you stop
 "$T" --phase merge comments <id># the card's comment thread
 "$T" post-comment <id> <file>   # post a comment from a file
@@ -67,14 +69,15 @@ Removing `Approved` is how Max hands a card back to build-card. That is his move
 | # | Card at | Who | Action |
 |---|---|---|---|
 | 1 | `In Review` + `PR` | **Max** | Tests the PR, adds `Approved`, moves it to `Ready` |
-| 2 | `Ready` + `Approved` | this skill | `claim` topmost (auto-moves to `In Progress`) |
+| 2 | `Ready` + `Approved` | this skill | `claim` topmost (auto-moves to `In Progress`), then `session-name.py` — `PIPELINE.md §0` |
 | 3 | `In Progress` | this skill | Find PR → preflight → squash-merge → sync `main` → delete worktree and branches → `Done` |
 | — | `In Progress` | this skill | Escape hatch: anything in preflight fails → report on the card → `In Review`, **not merged** |
 
 There are no questionnaires in this phase and no rounds. A merge either goes through or it
 doesn't; there is nothing to ask about that a bracketed default could answer. `claim` still
 reports `mode` and `revision` because every phase shares one helper — **ignore both fields
-here.** `mode` is always `new`.
+here.** `mode` is always `new`. `run` is always `1` for the same reason, so this phase's
+session name never carries a pass number — pass the card name alone.
 
 ### Claiming
 

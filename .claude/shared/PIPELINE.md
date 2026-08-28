@@ -9,6 +9,53 @@ Skills that use this: `spec-card`, `plan-card`, `build-card`, `merge-card`, `che
 
 ---
 
+## 0. Name the session before anything else
+
+Switchboard's session list is the only place Max sees what his agents are doing, and by
+default a row is titled with whatever the first prompt said — four rows reading "check the
+board" tell him nothing. **The first thing every skill does is rename its own session**, so
+the list reads as a status board:
+
+```
+[spec] Add a close button              [build] Add a close button (2)
+[plan] Guard resume when a session…    [merge] Drop the fork button from session rows
+```
+
+One script does it, shared by every skill exactly like `trello.py`:
+
+```
+./scripts/session-name.py <phase> "<card name>" [run]
+```
+
+- **`<phase>`** — your own `--phase` value (`spec｜plan｜pr｜merge`). It maps `pr` to `build`,
+  the word Max uses on the board, so no skill has to remember that.
+- **`<card name>`** — the card's `name` verbatim from `claim`. Long titles are truncated.
+- **`[run]`** — the `run` field from `claim`. `1` prints no suffix; `2` and up print ` (2)`,
+  which is the whole point — a repeat pass on a card is the thing worth spotting in the list.
+
+**Call it immediately after `claim` returns a card, before any other work** — the name is
+what tells Max which session to open while the run is still going, so it is worthless
+posted at the end. It is safe to call again later if you learn something better; the last
+name wins.
+
+`check-board` has no card when it starts, so it names itself `board` and passes no run.
+
+### What `run` means
+
+The number of times **this phase** has picked **this card** up, counting the current pass.
+`claim` computes it; never count it yourself. Trello records no label history on this board,
+so each phase derives it differently and `run_number` in the helper documents how — the one
+you need to know is that `merge` always reports `1`, because a retried merge is
+indistinguishable from the build passes before it and a wrong number is worse than none.
+
+### If it fails
+
+The rename is cosmetic; the card is not. If the script errors — no session id, no transcript
+— say so in one line and **carry on with the phase**. Never abandon a claimed card over a
+session title, and never retry it more than once.
+
+---
+
 ## 1. The board model
 
 One card walks the board once, through four phases, each owned by a different skill.
@@ -93,6 +140,9 @@ Skills that enter a git worktree lose the skill directory as their working direc
 they set `T="$REPO/.claude/skills/<skill>/scripts/trello.py"` up front and call `"$T"`
 throughout. Skills that stay put call `./scripts/trello.py`. Both are the same script.
 
+`session-name.py` sits beside it, symlinked into every skill the same way, and is reached
+the same two ways — see `§0`. It touches no Trello and needs no credentials.
+
 ## 4. Claiming — always start with `claim`, never `pick`
 
 `pick` is read-only, for peeking at the queue. It is **not** safe to act on: reading the card
@@ -133,7 +183,9 @@ the end, and treat `release` failing with `no lock … (already released?)` as a
 
 ## 5. What `claim` hands you
 
-Two independent fields. Read both; they answer different questions.
+Two independent fields decide what you do. (A third, **`run`**, decides nothing — it is the
+pass number for the session name and is covered in `§0`.) Read both; they answer different
+questions.
 
 **`revision`** — from the card's **labels**. `true` means the card already carries this
 phase's *own* output label: the phase ran to completion once and Max has sent it back for

@@ -32,6 +32,8 @@ Subcommands:
                            order (phase-independent - this is /check-board's view)
   pick                     inspect the next card this phase owns (read-only, no claim)
   claim                    pick AND lock it -> JSON with a nonce, or {"card": null}
+                           Both also report "run": which pass over this card this is,
+                           for the session name. See run_number.
   release <id> <nonce>     drop the lock taken by claim
   card <id>                dump one card as JSON (name, desc, list, labels)
   comments <id>            JSON: all comments oldest-first, plus questionnaire/answer split
@@ -229,6 +231,48 @@ def mode_of(state):
     return "resume" if state["has_new_answers"] else "stalled"
 
 
+def run_number(card_id, phase, state, counting_current):
+    """Which pass this is: 1 for a first run, 2 the second time this phase picks the
+    same card up, and so on. Only the session name uses it - it is what lets Max tell
+    a revision round from a first build at a glance in Switchboard's session list.
+
+    There is no single counter behind this. Trello logs no label actions on this board
+    at all - a card's action feed carries createCard, updateCard and commentCard and
+    nothing else - so "when did this phase take the card over" cannot be read off a
+    label timestamp. Each phase counts its own passes from what it does leave behind:
+
+      spec, plan  Every pass but the last one ends by posting a questionnaire, so the
+                  pass number is last_round + 1. Exact.
+      pr          spec-card and plan-card rewrite the description on every pass and
+                  build-card never touches it, so the last desc edit is the moment the
+                  plan phase let go of the card. Count the entries into In Progress
+                  after it. Exact, and unambiguous because the pr phase never sees an
+                  Approved card, so no merge pass can fall inside the same window.
+      merge       Always 1. A merge that refuses and is retried is the only repeat this
+                  phase can have, and nothing on the card separates it from the build
+                  passes sharing that window. A wrong number is worse than none.
+
+    `counting_current` says whether this phase's own move into In Progress has already
+    happened: true after claim's PUT, false for pick, which peeks at a card still in
+    Ready and so reports what the NEXT run would be numbered.
+    """
+    if phase in ("spec", "plan"):
+        return state["last_round"] + 1
+    if phase == "merge":
+        return 1
+    actions = api("GET", f"/cards/{card_id}/actions", filter="updateCard", limit="1000")
+    last_desc = max(
+        (a["date"] for a in actions if "desc" in a["data"].get("old", {})), default=""
+    )
+    entries = sum(
+        1
+        for a in actions
+        if a["data"].get("listAfter", {}).get("name") == "In Progress"
+        and a["date"] > last_desc
+    )
+    return max(entries, 1) if counting_current else entries + 1
+
+
 def cmd_pick(phase):
     """Strict trigger: only the phase's own lists are scanned.
 
@@ -248,6 +292,7 @@ def cmd_pick(phase):
                     "phase": phase,
                     "mode": mode_of(state),
                     "revision": is_revision(card, phase),
+                    "run": run_number(card["id"], phase, state, counting_current=False),
                     "last_round": state["last_round"],
                     "answers_since": state["answers_since"],
                 },
@@ -435,6 +480,7 @@ def cmd_claim(phase):
                     "phase": phase,
                     "mode": mode_of(state),
                     "revision": is_revision(card, phase),
+                    "run": run_number(card_id, phase, state, counting_current=True),
                     "last_round": state["last_round"],
                     "answers_since": state["answers_since"],
                     "lock": nonce,

@@ -27,6 +27,7 @@ This file carries only what is specific to the spec phase.
 
 ```
 ./scripts/trello.py claim                     # claim the next card — START HERE
+./scripts/session-name.py spec "<name>" <run> # rename the session — right after claim
 ./scripts/trello.py release <id> <nonce>      # drop the claim when you stop
 ./scripts/trello.py comments <id>             # thread + questionnaire/answer split
 ./scripts/trello.py post-comment <id> <file>  # post a comment from a file
@@ -42,7 +43,7 @@ Pass `--phase plan` only if you are deliberately inspecting plan-card's queue.
 | # | Card at | Who | Action |
 |---|---|---|---|
 | 0 | `Backlog`, no label | **Max** | Decides the idea is worth speccing and **moves it to `Ready` himself** |
-| 1 | `Ready`, no label | this skill | `claim` it (auto-moves to `In Progress`) |
+| 1 | `Ready`, no label | this skill | `claim` it (auto-moves to `In Progress`), then `session-name.py` — `PIPELINE.md §0` |
 | 2 | `In Progress` | this skill | Seed description, post round-1 questions → move to `In Review` |
 | 3 | `In Review` | **Max** | Answers in a comment, then **moves the card to `Ready` himself** |
 | 4 | `Ready`, no label | this skill | `claim` it again, read answers, update the spec |

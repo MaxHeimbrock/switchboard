@@ -50,6 +50,19 @@ function wrapInGridCard(sessionId) {
   };
   header.appendChild(stopBtn);
 
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'grid-card-close-btn';
+  closeBtn.title = 'Close panel';
+  closeBtn.setAttribute('aria-label', 'Close panel');
+  closeBtn.innerHTML = '<svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 3l6 6M9 3l-6 6"/></svg>';
+  // Swallow mousedown so the header's focus handler doesn't focus a card we're closing.
+  closeBtn.onmousedown = (e) => e.stopPropagation();
+  closeBtn.onclick = (e) => {
+    e.stopPropagation();
+    closeGridCard(sessionId);
+  };
+  header.appendChild(closeBtn);
+
   // Footer
   const footer = document.createElement('div');
   footer.className = 'grid-card-footer';
@@ -168,6 +181,57 @@ function focusGridCard(sessionId) {
   if (entry) entry.terminal.focus();
 }
 
+// Close one grid panel. This is not Stop: the PTY keeps running and the session
+// can be reopened from the sidebar, reattaching with its scrollback replayed.
+function closeGridCard(sessionId) {
+  const card = gridCards.get(sessionId);
+  if (!card) return;
+
+  // Work out the neighbour before the card leaves the DOM. DOM order is visual
+  // order — project headings are full-row grid items, so they don't disturb it.
+  const cards = [...terminalsEl.querySelectorAll('.grid-card')];
+  const idx = cards.indexOf(card);
+  const neighbour = cards[idx + 1] || cards[idx - 1] || null;
+  const nextFocusId = neighbour ? neighbour.dataset.sessionId : null;
+
+  // Remember the heading this card sits under, to prune it if the group empties.
+  let heading = card.previousElementSibling;
+  while (heading && !heading.classList.contains('grid-project-heading')) {
+    heading = heading.previousElementSibling;
+  }
+
+  const wasFocused = gridFocusedSessionId === sessionId;
+
+  destroySession(sessionId);
+  // Defensive: destroySession returns early if the entry is already gone.
+  if (card.isConnected) card.remove();
+  gridCards.delete(sessionId);
+
+  // Drop the project heading if that group has no cards left.
+  if (heading) {
+    let el = heading.nextElementSibling;
+    let hasCard = false;
+    while (el && !el.classList.contains('grid-project-heading')) {
+      if (el.classList.contains('grid-card')) { hasCard = true; break; }
+      el = el.nextElementSibling;
+    }
+    if (!hasCard) heading.remove();
+  }
+
+  updateGridCount();
+
+  if (wasFocused) {
+    if (nextFocusId) {
+      focusGridCard(nextFocusId);
+    } else {
+      // Last panel closed — stay in grid view, empty, nothing focused.
+      gridFocusedSessionId = null;
+      setActiveSession(null);
+      document.querySelectorAll('.session-item.active').forEach(el => el.classList.remove('active'));
+    }
+  }
+}
+
 function showGridView() {
   gridViewActive = true;
   localStorage.setItem('gridViewActive', '1');
@@ -232,7 +296,7 @@ function showGridView() {
 
   // Show grid header bar with session count
   gridViewer.style.display = 'block';
-  gridViewerCount.textContent = sessionIds.length + ' session' + (sessionIds.length !== 1 ? 's' : '');
+  updateGridCount();
 
   const btn = document.getElementById('grid-toggle-btn');
   if (btn) btn.classList.add('active');
@@ -247,6 +311,12 @@ function showGridView() {
     const toFocus = activeSessionId && sessionIds.includes(activeSessionId) ? activeSessionId : sessionIds[0];
     if (toFocus) focusGridCard(toFocus);
   });
+}
+
+// Header bar count. Single source of truth for the "N sessions" label — the grid
+// gains and loses cards from several places, and they must all agree.
+function updateGridCount() {
+  gridViewerCount.textContent = gridCards.size + ' session' + (gridCards.size !== 1 ? 's' : '');
 }
 
 function updateGridColumns() {

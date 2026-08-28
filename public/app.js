@@ -290,7 +290,7 @@ window.api.onProcessExited((sessionId, exitCode) => {
   if (session?.type === 'terminal') {
     if (entry) destroySession(sessionId);
     if (gridViewActive) {
-      gridViewerCount.textContent = gridCards.size + ' session' + (gridCards.size !== 1 ? 's' : '');
+      updateGridCount();
     } else if (activeSessionId === sessionId) {
       setActiveSession(null);
       terminalHeader.style.display = 'none';
@@ -317,7 +317,7 @@ window.api.onProcessExited((sessionId, exitCode) => {
   // real session file is coming.
 
   if (gridViewActive) {
-    gridViewerCount.textContent = gridCards.size + ' session' + (gridCards.size !== 1 ? 's' : '');
+    updateGridCount();
   }
 
   pollActiveSessions();

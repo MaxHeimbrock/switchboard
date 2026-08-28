@@ -2,10 +2,10 @@
 // Key bindings, write buffering, xterm instance lifecycle, drag-and-drop.
 //
 // Depends on globals: openSessions, activeSessionId, TERMINAL_THEME, terminalsEl,
-// gridViewActive, gridCards, gridViewerCount, placeholder, terminalHeader,
+// gridViewActive, gridCards, placeholder, terminalHeader,
 // sessionMap, activePtyIds (app.js)
 // Depends on: toggleGridView, isSessionNavKey, handleSessionNavKey, focusGridCard,
-// wrapInGridCard, showGridView (grid-view.js)
+// wrapInGridCard, showGridView, updateGridCount (grid-view.js)
 // Depends on: shellEscape (utils.js)
 
 // --- Terminal key bindings ---
@@ -385,7 +385,7 @@ function showSession(sessionId) {
       wrapInGridCard(sessionId);
       fitAndScroll(entry);
       requestAnimationFrame(() => focusGridCard(sessionId));
-      gridViewerCount.textContent = gridCards.size + ' session' + (gridCards.size !== 1 ? 's' : '');
+      updateGridCount();
     }
   } else {
     // Single terminal view

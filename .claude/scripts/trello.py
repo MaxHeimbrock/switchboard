@@ -3,7 +3,7 @@
 
 Credentials are read from ~/.trello.env (TRELLO_KEY / TRELLO_TOKEN) and never printed.
 
-The board runs one card through three phases, each owned by a different skill. A
+The board runs one card through four phases, each owned by a different skill. A
 phase is defined by the label it REQUIRES on a card (the last phase completed) and
 the label it PRODUCES when it finishes. Pass --phase before the subcommand; it
 defaults to `spec` so spec-card's existing invocations keep working unchanged.
@@ -11,10 +11,17 @@ defaults to `spec` so spec-card's existing invocations keep working unchanged.
   --phase spec   no phase label  -> Spec    (spec-card)
   --phase plan   Spec            -> Plan    (plan-card)
   --phase pr     Plan or PR      -> PR      (build-card)
+  --phase merge  Approved        -> (Done)  (merge-card)
 
 The pr phase accepts its own output label as well as its input one: a card Max has
 reviewed and moved back to Ready carries PR already, and comes round again for
 another pass on the same branch. `pick`/`claim` report that as "revision": true.
+
+Approved is the one label no skill applies - Max adds it by hand in In Review once
+he has tested the PR and is happy for it to land. Because phase_of takes the
+FURTHEST label in pipeline order, approving a card also lifts it out of the pr
+phase's queue, which is what routes it to merge-card rather than to another build
+round. Removing the label hands it back to build-card.
 
 Subcommands:
   pick                     inspect the next card this phase owns (read-only, no claim)
@@ -25,7 +32,8 @@ Subcommands:
   post-comment <id> <file> post file contents as a comment
   set-desc <id> <file>     replace the card description with file contents
   move <id> <list>         move card to Backlog|Ready|In Progress|In Review|Done
-  label <id> <name>        add label Spec|Plan|PR (no-op if already present)
+  label <id> <name>        add label Spec|Plan|PR (no-op if already present;
+                           Approved is Max's, applied by hand, and is refused here)
 """
 import datetime
 import json
@@ -49,7 +57,12 @@ LIST_NAMES = {v: k for k, v in LISTS.items()}
 
 # Labels mark the last phase COMPLETED, not the phase in flight. Pipeline order -
 # a card carrying several is at the furthest one along.
-PHASE_LABELS = ("Spec", "Plan", "PR")
+PHASE_LABELS = ("Spec", "Plan", "PR", "Approved")
+
+# ...and of those, the ones a skill may put on a card. Approved is deliberately
+# absent: it is Max's go-ahead to merge, and a skill able to award itself that
+# would defeat the only human gate in the pipeline.
+SKILL_LABELS = ("Spec", "Plan", "PR")
 
 # Each phase's questionnaire sentinel must be distinct, so one phase never reads
 # another phase's questions as its own. Authorship cannot be used to tell a
@@ -79,6 +92,14 @@ PHASES = {
         "requires": ("Plan", "PR"),
         "produces": "PR",
         "sentinel": "Build-me round",
+        "lists": ("Ready",),
+    },
+    # The end of the line. A card here has a PR that Max has approved by hand, so
+    # this phase produces no label at all - it merges, and the card lands in Done.
+    "merge": {
+        "requires": ("Approved",),
+        "produces": None,
+        "sentinel": "Merge-me round",
         "lists": ("Ready",),
     },
 }
@@ -174,8 +195,12 @@ def eligible(phase):
 def is_revision(card, phase):
     """True when the card already carries this phase's OWN output label, i.e. the
     phase ran to completion once and Max has sent it back for another pass. Only
-    the pr phase can see this - it is the only one that accepts its own output."""
-    return phase_of(card) == PHASES[phase]["produces"]
+    the pr phase can see this - it is the only one that accepts its own output.
+
+    Always False for a phase that produces no label, which would otherwise match
+    every unlabelled card against produces=None."""
+    produces = PHASES[phase]["produces"]
+    return produces is not None and phase_of(card) == produces
 
 
 def mode_of(state):
@@ -385,8 +410,10 @@ def cmd_move(card_id, list_name):
 
 
 def cmd_label(card_id, name):
-    if name not in PHASE_LABELS:
-        sys.exit(f"unknown label {name!r}; one of {', '.join(PHASE_LABELS)}")
+    if name == "Approved":
+        sys.exit("Approved is Max's label to apply, by hand, in Trello - not a skill's")
+    if name not in SKILL_LABELS:
+        sys.exit(f"unknown label {name!r}; one of {', '.join(SKILL_LABELS)}")
     labels = api("GET", f"/boards/{BOARD}/labels", fields="id,name")
     match = next((l for l in labels if l["name"] == name), None)
     if not match:

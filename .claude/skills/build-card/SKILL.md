@@ -15,6 +15,11 @@ review comments — his own, a colleague's, or an AI reviewer's — he moves the
 `In Review` to `Ready` with its `PR` label still on it. That is the signal for another round of
 implementation on the same branch and the same PR. See **Revision rounds**.
 
+When review is *finished* instead, he adds the `Approved` label. That takes the card out of
+this skill's queue entirely and hands it to merge-card, which merges the PR and closes the
+card out. `Approved` and "back to `Ready` for another round" are the two opposite moves he
+makes from `In Review`.
+
 This is the only phase that writes repo code. The spec said *what*, the plan said *how* —
 this skill does it and proves it works. It does not re-decide either.
 
@@ -52,12 +57,19 @@ Never build them as inline shell strings — the text is markdown with newlines 
   `In Review` waiting on Max · `Ready` groomed, next agent's turn · `Done` shipped.
 - **Label = the last phase *completed*.** No label → spec-card's turn. `Spec` → plan-card's
   turn. `Plan` → **this skill's turn**. `PR` → a PR is open; **also this skill's turn**, but
-  only once Max has moved the card back to `Ready`.
+  only once Max has moved the card back to `Ready`. `Approved` → Max has signed the PR off;
+  the card is merge-card's and is no longer yours.
 
 This is the one phase that accepts its own output label, because implementation is the only
 step that loops: `Plan` in `Ready` is a first build, `PR` in `Ready` is a revision round.
 Everywhere else in the pipeline `PR` means hands off. `claim --phase pr` enforces the list and
 the labels, and never picks a `PR` card out of `In Review`.
+
+An `Approved` card is not yours either, even sitting in `Ready` with a `PR` label under it.
+`phase_of` reads the **furthest** label, so approving a card lifts it out of this queue
+automatically — `claim` will walk straight past it. That is the mechanism that keeps this skill
+and merge-card off each other's cards, and it is why you must never add or remove `Approved`
+yourself.
 
 ## The loop
 
@@ -65,15 +77,16 @@ the labels, and never picks a `PR` card out of `In Review`.
 |---|---|---|---|
 | 1 | `Ready` + `Plan` | this skill | `claim` topmost (auto-moves to `In Progress`) |
 | 2 | `In Progress` | this skill | Worktree → implement → verify → draft PR → label `PR`, move to `In Review` |
-| 3 | `In Review` + `PR` | **Max** | Tests it, gathers review comments. Merging and `Done` are his |
-| 4 | `Ready` + `PR` | this skill | **Revision round** — `claim`, read the PR feedback, another pass on the same branch, back to `In Review` |
-| 5 | — | | Steps 3–4 repeat for as many rounds as the review takes |
+| 3 | `In Review` + `PR` | **Max** | Tests it, gathers review comments. Then either adds `Approved` (→ merge-card, done here) or leaves it off and moves the card to `Ready` |
+| 4 | `Ready` + `PR`, no `Approved` | this skill | **Revision round** — `claim`, read the PR feedback, another pass on the same branch, back to `In Review` |
+| 5 | — | | Steps 3–4 repeat for as many rounds as the review takes, until he approves |
 | — | `In Progress` | this skill | Escape hatch: plan unbuildable → round-*n* questions → `In Review`, no new label |
 
 Steps 2 and 4 are the whole job. `In Review` here means *a PR is waiting on Max*, unlike the
 earlier phases where it means *a questionnaire is waiting on Max* — the `PR` label tells the two
 apart. Max moving a `PR` card back to `Ready` is the only thing that starts a revision round; a
-comment appearing on the PR is not.
+comment appearing on the PR is not — and if he added `Approved` on the way past, the card has
+gone to merge-card instead and is finished as far as this skill is concerned.
 
 ### What `claim` hands you
 
@@ -480,5 +493,7 @@ re-litigate a `## Decisions` entry or re-open the spec.
 - Tick a checklist item you did not run, or drop one from the plan's Verification block.
 - Edit the card description, or delete/edit any comment other than a lock comment.
 - Move a card out of `In Review` — that is Max's move.
-- Move a card to `Done`. Merging the PR and closing the card are his.
-- Touch cards on any board but Switchboard, or cards carrying neither `Plan` nor `PR`.
+- Move a card to `Done`, or add or remove the `Approved` label. Approving is Max's; merging
+  and closing the card out are merge-card's.
+- Touch cards on any board but Switchboard, cards carrying neither `Plan` nor `PR`, or cards
+  carrying `Approved`.

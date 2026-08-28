@@ -191,12 +191,16 @@ function buildMemoryItem(file) {
   const row = document.createElement('div');
   row.className = 'session-row';
 
-  // Icon: schedule clock for schedule-*.md files, brain for everything else
+  // Icon: schedule clock for schedule-*.md files, cap for skills, brain for everything else.
+  // Skills key off `source` — every one of their files is called SKILL.md.
   const isSchedule = file.filename.startsWith('schedule-');
+  const isSkill = file.source === 'skill';
   const icon = document.createElement('span');
-  icon.className = isSchedule ? 'memory-schedule-icon' : 'memory-brain-icon';
+  icon.className = isSchedule ? 'memory-schedule-icon' : isSkill ? 'memory-skill-icon' : 'memory-brain-icon';
   icon.innerHTML = isSchedule
     ? ICONS.schedule(15)
+    : isSkill
+    ? ICONS.skill(15)
     : '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/><path d="M17.599 6.5a3 3 0 0 0 .399-1.375"/><path d="M6.003 5.125A3 3 0 0 0 6.401 6.5"/><path d="M3.477 10.896a4 4 0 0 1 .585-.396"/><path d="M19.938 10.5a4 4 0 0 1 .585.396"/><path d="M6 18a4 4 0 0 1-1.967-.516"/><path d="M19.967 17.484A4 4 0 0 1 18 18"/></svg>';
   row.appendChild(icon);
 
@@ -205,7 +209,7 @@ function buildMemoryItem(file) {
 
   const titleEl = document.createElement('div');
   titleEl.className = 'session-summary';
-  titleEl.textContent = file.filename;
+  titleEl.textContent = file.displayName || file.filename;
 
   const pathEl = document.createElement('div');
   pathEl.className = 'session-id';
@@ -275,5 +279,5 @@ async function openMemory(file) {
   settingsViewer.style.display = 'none';
   memoryViewer.style.display = 'flex';
 
-  memoryPanel.open(file.filename, file.filePath, content);
+  memoryPanel.open(file.displayName || file.filename, file.filePath, content);
 }

@@ -37,8 +37,8 @@ Never build them as inline shell strings — the text is markdown with newlines 
 
 - **List = who holds the baton.** `Backlog` unpicked · `In Progress` an agent is working ·
   `In Review` waiting on Max · `Ready` groomed, next agent's turn · `Done` shipped.
-- **Label = the last phase *completed*.** `Spec` → plan-card's turn. `Plan` → implement
-  skill's turn. `PR` → open for review. No label → this skill's turn.
+- **Label = the last phase *completed*.** `Spec` → plan-card's turn. `Plan` →
+  build-card's turn. `PR` → open for review. No label → this skill's turn.
 
 So a card is this skill's only when it carries **none** of those labels. `pick` enforces this.
 

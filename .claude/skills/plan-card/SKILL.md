@@ -40,7 +40,7 @@ Never build them as inline shell strings — the text is markdown with newlines 
 - **List = who holds the baton.** `Backlog` unpicked · `In Progress` an agent is working ·
   `In Review` waiting on Max · `Ready` groomed, next agent's turn · `Done` shipped.
 - **Label = the last phase *completed*.** No label → spec-card's turn. `Spec` → **this
-  skill's turn**. `Plan` → implement skill's turn. `PR` → open for review.
+  skill's turn**. `Plan` → build-card's turn. `PR` → open for review.
 
 So a card is this skill's only when it carries `Spec` and **not** `Plan` or `PR`, and only
 from `Ready`. `claim --phase plan` enforces both.
@@ -54,7 +54,7 @@ from `Ready`. `claim --phase plan` enforces both.
 | 3 | `In Progress` | this skill | Questions needed → write partial plan, post round-*n* questions → move to `In Review` |
 | 4 | `In Review` | **Max** | Answers in a comment, then **moves the card to `Ready` himself** |
 | 5 | `Ready` + `Spec` | this skill | `claim` it, fold answers in → step 2 or step 3 (round *n+1*) |
-| 6 | `Ready` + `Plan` | implement skill | Not this skill's card any more |
+| 6 | `Ready` + `Plan` | build-card | Not this skill's card any more |
 
 ### What `claim` hands you
 
@@ -108,7 +108,7 @@ noting they are a repeat, move back to `In Review`, and stop.
 
 ## Grounding the plan — read the code first
 
-A plan that names a file that does not exist is worse than no plan: the implement skill will
+A plan that names a file that does not exist is worse than no plan: build-card will
 follow it. Before writing a single step:
 
 1. Read the whole card description — `## Spec` is the contract, `## Decisions` are settled
@@ -211,7 +211,7 @@ anything before Max answers; usually you can draft most of it and flag the open 
 
 ## Risks
 <Spec-phase risks you have now resolved get struck through or rewritten with the answer.
-Add: anything the implement skill must not get wrong, plus anything left open by the
+Add: anything build-card must not get wrong, plus anything left open by the
 3-round cap. Omit the section only if there is genuinely nothing.>
 ```
 
@@ -247,8 +247,8 @@ Rules for the steps:
   the next one happens to fix.
 - **Right-sized**: each step is one reviewable change with its own verification. A step
   nobody can check is too big; a step that only renames a variable is too small.
-- **Concrete**: symbols and line ranges, not "update the handler". The implement skill
-  should not have to re-do your search.
+- **Concrete**: symbols and line ranges, not "update the handler" — build-card should
+  not have to re-do your search.
 - **Complete against the spec**: every acceptance criterion in `## Spec` is reachable by
   following the steps, and `**Verification**` proves each one.
 
@@ -264,7 +264,7 @@ When `## Open questions` is empty, or the 3-round cap is reached:
    assumed-unanswered decision or leftover risk. **Do not paste the plan into a comment** —
    the description is the single copy.
 
-Then stop. The card is the implement skill's.
+Then stop. The card is build-card's.
 
 ## When questions are needed instead
 

@@ -10,7 +10,11 @@ defaults to `spec` so spec-card's existing invocations keep working unchanged.
 
   --phase spec   no phase label  -> Spec    (spec-card)
   --phase plan   Spec            -> Plan    (plan-card)
-  --phase pr     Plan            -> PR      (not written yet)
+  --phase pr     Plan or PR      -> PR      (build-card)
+
+The pr phase accepts its own output label as well as its input one: a card Max has
+reviewed and moved back to Ready carries PR already, and comes round again for
+another pass on the same branch. `pick`/`claim` report that as "revision": true.
 
 Subcommands:
   pick                     inspect the next card this phase owns (read-only, no claim)
@@ -50,9 +54,15 @@ PHASE_LABELS = ("Spec", "Plan", "PR")
 # Each phase's questionnaire sentinel must be distinct, so one phase never reads
 # another phase's questions as its own. Authorship cannot be used to tell a
 # skill's comments from Max's: the API token acts as Max himself.
+#
+# `requires` is the set of phase states a card may be in for this phase to own it,
+# where the state is the FURTHEST label on the card (see phase_of). It is a tuple
+# because the pr phase also accepts its own `produces` label: a card that already
+# has a PR, has been reviewed, and that Max moved back to Ready is asking for
+# another round of implementation on the same branch, not a second PR.
 PHASES = {
     "spec": {
-        "requires": None,
+        "requires": (None,),
         "produces": "Spec",
         "sentinel": "Spec-me round",
         # Backlog is in scope only for the first phase - a card parked there with a
@@ -60,13 +70,13 @@ PHASES = {
         "lists": ("Ready", "Backlog"),
     },
     "plan": {
-        "requires": "Spec",
+        "requires": ("Spec",),
         "produces": "Plan",
         "sentinel": "Plan-me round",
         "lists": ("Ready",),
     },
     "pr": {
-        "requires": "Plan",
+        "requires": ("Plan", "PR"),
         "produces": "PR",
         "sentinel": "Build-me round",
         "lists": ("Ready",),
@@ -157,8 +167,15 @@ def eligible(phase):
     """Cards this phase owns, in board order, across the lists it may draw from."""
     for list_name in PHASES[phase]["lists"]:
         for card in cards_in(list_name):
-            if phase_of(card) == PHASES[phase]["requires"]:
+            if phase_of(card) in PHASES[phase]["requires"]:
                 yield card
+
+
+def is_revision(card, phase):
+    """True when the card already carries this phase's OWN output label, i.e. the
+    phase ran to completion once and Max has sent it back for another pass. Only
+    the pr phase can see this - it is the only one that accepts its own output."""
+    return phase_of(card) == PHASES[phase]["produces"]
 
 
 def mode_of(state):
@@ -188,6 +205,7 @@ def cmd_pick(phase):
                     "card": summarise(card),
                     "phase": phase,
                     "mode": mode_of(state),
+                    "revision": is_revision(card, phase),
                     "last_round": state["last_round"],
                     "answers_since": state["answers_since"],
                 },
@@ -319,6 +337,7 @@ def cmd_claim(phase):
                     "card": summarise(card),
                     "phase": phase,
                     "mode": mode_of(state),
+                    "revision": is_revision(card, phase),
                     "last_round": state["last_round"],
                     "answers_since": state["answers_since"],
                     "lock": nonce,

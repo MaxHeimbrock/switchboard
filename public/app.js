@@ -45,6 +45,8 @@ const jsonlViewer = document.getElementById('jsonl-viewer');
 const jsonlViewerTitle = document.getElementById('jsonl-viewer-title');
 const jsonlViewerSessionId = document.getElementById('jsonl-viewer-session-id');
 const jsonlViewerBody = document.getElementById('jsonl-viewer-body');
+const jsonlViewerResumeBtn = document.getElementById('jsonl-viewer-resume-btn');
+const jsonlViewerCloseBtn = document.getElementById('jsonl-viewer-close-btn');
 const gridViewer = document.getElementById('grid-viewer');
 const gridViewerCount = document.getElementById('grid-viewer-count');
 let gridViewActive = localStorage.getItem('gridViewActive') === '1';
@@ -428,6 +430,21 @@ addProjectBtn.addEventListener('click', () => {
   showAddProjectDialog();
 });
 
+// --- Read-only transcript view header buttons ---
+// Resume goes through openSession, the same entry point the row's resume button uses,
+// so the lock guard fires and the block dialog appears over a transcript that stays
+// open and readable.
+jsonlViewerResumeBtn.addEventListener('click', async () => {
+  const session = jsonlTail.session;
+  if (!session) return;
+  await openSession(session);
+  // A refused resume leaves the transcript up on purpose — the block dialog appears
+  // over it. A successful one has to take it down, and showSession only does that on
+  // its single-terminal path, not in grid view.
+  if (jsonlViewer.style.display !== 'none' && isRunningHere(session.sessionId)) closeJsonlViewer();
+});
+jsonlViewerCloseBtn.addEventListener('click', closeJsonlViewer);
+
 // --- Search (debounced, per-tab FTS) ---
 let searchDebounceTimer = null;
 const searchClear = document.getElementById('search-clear');
@@ -810,6 +827,17 @@ async function showTerminalHeader(session) {
 
 // Terminal lifecycle (createTerminalEntry, destroySession, showSession, setupDragAndDrop) → terminal-manager.js
 
+// Switchboard itself owns a live PTY for this session — the one thing that decides
+// whether a row click shows a terminal or a transcript. `openSessions` is consulted
+// as well as the poll: a pane created a moment ago is not in `activePtyIds` until the
+// next tick, and dropping a visible terminal to its transcript would be worse than a
+// marker being briefly stale.
+function isRunningHere(sessionId) {
+  if (activePtyIds.has(sessionId)) return true;
+  const entry = openSessions.get(sessionId);
+  return !!entry && !entry.closed;
+}
+
 async function openSession(session, customOptions) {
   const { sessionId, projectPath } = session;
 
@@ -873,6 +901,26 @@ window.addEventListener('resize', () => {
   }
 });
 
+// Put the main area back to whatever it was showing before a viewer took it over:
+// the grid, the active session's terminal, or the placeholder. Shared by the
+// sessions-tab switch and the transcript view's close button.
+function restoreMainArea() {
+  hideAllViewers();
+  if (gridViewActive) {
+    // Grid is still set up — just re-show it and refit
+    placeholder.style.display = 'none';
+    terminalHeader.style.display = 'none';
+    gridViewer.style.display = 'block';
+    for (const entry of openSessions.values()) {
+      if (!entry.closed) fitAndScroll(entry);
+    }
+  } else if (activeSessionId && openSessions.has(activeSessionId)) {
+    showSession(activeSessionId);
+  } else {
+    placeholder.style.display = '';
+  }
+}
+
 // --- Tab switching ---
 document.querySelectorAll('.sidebar-tab').forEach(tab => {
   tab.addEventListener('click', () => {
@@ -901,20 +949,7 @@ document.querySelectorAll('.sidebar-tab').forEach(tab => {
       searchInput.placeholder = 'Search sessions...';
       sidebarContent.style.display = '';
       // Restore terminal area
-      hideAllViewers();
-      if (gridViewActive) {
-        // Grid is still set up — just re-show it and refit
-        placeholder.style.display = 'none';
-        terminalHeader.style.display = 'none';
-        gridViewer.style.display = 'block';
-        for (const entry of openSessions.values()) {
-          if (!entry.closed) fitAndScroll(entry);
-        }
-      } else if (activeSessionId && openSessions.has(activeSessionId)) {
-        showSession(activeSessionId);
-      } else {
-        placeholder.style.display = '';
-      }
+      restoreMainArea();
       // Catch up on changes that happened while on another tab
       if (projectsChangedWhileAway) {
         projectsChangedWhileAway = false;
@@ -928,11 +963,9 @@ document.querySelectorAll('.sidebar-tab').forEach(tab => {
     } else if (tabName === 'stats') {
       statsContent.style.display = '';
       // Immediately show stats viewer in main area
+      hideAllViewers();
       placeholder.style.display = 'none';
       terminalArea.style.display = 'none';
-      planViewer.style.display = 'none';
-      memoryViewer.style.display = 'none';
-      settingsViewer.style.display = 'none';
       statsViewer.style.display = 'flex';
       loadStats();
     } else if (tabName === 'memory') {
@@ -1030,6 +1063,14 @@ initGridObservers();
   // e._handled to prevent the document listener from double-firing the same action.
   document.addEventListener('keydown', (e) => {
     if (e._handled) return;
+    // Escape → close the read-only transcript view. Gated on no dialog being up, so
+    // a dialog's own Escape handler is never double-fired.
+    if (e.key === 'Escape' && jsonlViewer.style.display !== 'none'
+        && !document.querySelector('.new-session-overlay, .modal-overlay')) {
+      e.preventDefault();
+      closeJsonlViewer();
+      return;
+    }
     // Cmd/Ctrl+Shift+G → toggle grid view
     const mod = isMac ? e.metaKey : e.ctrlKey;
     if (e.key === 'g' && mod && e.shiftKey && !e.altKey) {

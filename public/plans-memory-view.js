@@ -98,6 +98,9 @@ function hideAllViewers() {
   settingsViewer.style.display = 'none';
   jsonlViewer.style.display = 'none';
   terminalArea.style.display = '';
+  // The chokepoint every navigation-away passes through, so it is where the
+  // transcript tail's file watcher is released. A no-op when nothing is tailing.
+  stopJsonlTail();
 }
 
 function hidePlanViewer() {

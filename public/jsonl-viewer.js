@@ -1,6 +1,7 @@
 // --- JSONL Message History Viewer ---
-// Depends on globals: escapeHtml (utils.js), hideAllViewers, placeholder,
-// terminalArea, jsonlViewer, jsonlViewerTitle, jsonlViewerSessionId, jsonlViewerBody (app.js)
+// Depends on globals: escapeHtml (utils.js), hideAllViewers (plans-memory-view.js),
+// placeholder, terminalArea, jsonlViewer, jsonlViewerTitle, jsonlViewerSessionId,
+// jsonlViewerBody, restoreMainArea (app.js)
 
 function renderJsonlText(text) {
   if (window.marked) {
@@ -245,6 +246,17 @@ function renderLocalCommand({ cmd, output }) {
 }
 
 // Merge consecutive local command entries (separate JSONL entries for caveat, bash-input, stdout/stderr)
+//
+// Returns [{ entry, from, to, open }] — `from`/`to` are the half-open range of raw
+// indices the element was built from, which is what lets an incremental re-render map
+// a DOM node back to the raw entries behind it. A synthetic local-command entry spans
+// its whole group; everything else spans one entry.
+//
+// `open` marks an element built from a group that ran to the end of the list without
+// its closing </bash-stdout> — the other process is still writing it, so what it
+// renders as will change. That is the one thing a caller cannot work out from the
+// result, because a group becomes synthetic as soon as <bash-input> closes, well
+// before its output arrives.
 function mergeLocalCommandEntries(entries) {
   const result = [];
   let i = 0;
@@ -257,6 +269,7 @@ function mergeLocalCommandEntries(entries) {
       // Gather consecutive entries that are part of this local command
       let combined = '';
       const start = i;
+      let terminated = false;
       while (i < entries.length) {
         const t = getEntryText(entries[i]);
         if (!t) break;
@@ -265,8 +278,11 @@ function mergeLocalCommandEntries(entries) {
         combined += t + '\n';
         i++;
         // Stop after we've seen stdout or stderr (end of command)
-        if (/<\/bash-stdout>|<\/bash-stderr>/.test(t)) break;
+        if (/<\/bash-stdout>|<\/bash-stderr>/.test(t)) { terminated = true; break; }
       }
+      // Ended only because the file ended: the next append may extend this group.
+      // A run stopped by an entry that follows it is bounded, however it ended.
+      const open = !terminated && i === entries.length;
 
       const inputMatch = combined.match(/<bash-input>([\s\S]*?)<\/bash-input>/);
       if (inputMatch) {
@@ -277,17 +293,53 @@ function mergeLocalCommandEntries(entries) {
         const stderr = stderrMatch ? stderrMatch[1].trim() : '';
         const output = [stdout, stderr].filter(Boolean).join('\n');
         // Create a synthetic entry
-        result.push({ _localCmd: { cmd, output }, type: 'local-command' });
+        result.push({ entry: { _localCmd: { cmd, output }, type: 'local-command' }, from: start, to: i, open });
       } else {
         // Couldn't parse, keep original entries
-        for (let j = start; j < i; j++) result.push(entries[j]);
+        for (let j = start; j < i; j++) result.push({ entry: entries[j], from: j, to: j + 1, open });
       }
     } else {
-      result.push(entry);
+      result.push({ entry, from: i, to: i + 1, open: false });
       i++;
     }
   }
   return result;
+}
+
+// How far back an unresolved tool call is still considered live. Beyond it, a call
+// that never got a result is treated as abandoned rather than pinning the boundary
+// at that entry for the rest of the session.
+const UNSETTLED_TOOL_WINDOW = 50;
+
+// The lowest raw index whose rendering can still change as more entries arrive —
+// the boundary an incremental re-render starts from. Everything below it is final
+// and keeps its DOM, and with it its expand/collapse state. `rawLen` when nothing
+// is unsettled.
+function computeSafeFrom(merged, resultIds, rawLen) {
+  let safeFrom = rawLen;
+
+  // (a) A local-command group the other process is still writing: its output, and
+  // whether it renders as a command block at all, both change as entries land.
+  for (const el of merged) {
+    if (el.open) safeFrom = Math.min(safeFrom, el.from);
+  }
+
+  // (b) A tool_use whose result has not arrived yet: the result renders inside the
+  // call's own block, so the call has to be re-rendered when it lands.
+  const windowStart = Math.max(0, merged.length - UNSETTLED_TOOL_WINDOW);
+  for (let i = windowStart; i < merged.length; i++) {
+    const el = merged[i];
+    const blocks = el.entry.message?.content || el.entry.content;
+    if (!Array.isArray(blocks)) continue;
+    for (const block of blocks) {
+      if (block.type === 'tool_use' && block.id && !resultIds.has(block.id)) {
+        safeFrom = Math.min(safeFrom, el.from);
+        break;
+      }
+    }
+  }
+
+  return safeFrom;
 }
 
 function getEntryText(entry) {
@@ -552,8 +604,23 @@ function renderJsonlEntry(entry, toolResultMap) {
   return div;
 }
 
+// --- Live-tailing read-only transcript view ---
+//
+// The view is read-only in the strong sense: it spawns no PTY and offers no input
+// path, so opening it can never collide with the `claude` process that holds the
+// session. It follows the .jsonl as that process appends to it.
+//
+// `nodes` runs parallel to the body's children: [{ from, el }] ascending by `from`,
+// so the tail can be dropped by raw index. `gen` invalidates a pass whose session
+// was navigated away from while it was awaiting its read.
+const jsonlTail = { gen: 0, session: null, cursor: null, raw: [], nodes: [], safeFrom: 0 };
+
+// Passes are serialised: two of them reading the same cursor would each append the
+// same entries. A change arriving mid-pass sets `pending` and runs one more.
+let jsonlTailBusy = false;
+let jsonlTailPending = false;
+
 async function showJsonlViewer(session) {
-  const result = await window.api.readSessionJsonl(session.sessionId);
   hideAllViewers();
   placeholder.style.display = 'none';
   terminalArea.style.display = 'none';
@@ -564,20 +631,105 @@ async function showJsonlViewer(session) {
   jsonlViewerSessionId.textContent = session.sessionId;
   jsonlViewerBody.innerHTML = '';
 
+  const gen = ++jsonlTail.gen;
+  jsonlTail.session = session;
+  jsonlTail.cursor = null;
+  jsonlTail.raw = [];
+  jsonlTail.nodes = [];
+  jsonlTail.safeFrom = 0;
+
+  await updateJsonlView();
+  // Another session was opened while the first render was in flight — its own call
+  // owns the watcher now, and installing ours would point it at the wrong file.
+  if (gen !== jsonlTail.gen) return;
+  // Watched after the first render, so a change during it is caught by the pass
+  // itself rather than arriving before there is anything to reconcile against.
+  await window.api.watchSessionTranscript(session.sessionId);
+}
+
+function stopJsonlTail() {
+  const tailing = jsonlTail.session;
+  jsonlTail.gen++;
+  jsonlTail.session = null;
+  jsonlTail.cursor = null;
+  jsonlTail.raw = [];
+  jsonlTail.nodes = [];
+  jsonlTail.safeFrom = 0;
+  // Named, so a stop for the transcript we were on cannot take down a watcher a
+  // reopen has already installed for another. Skipped entirely when nothing was
+  // tailing — hideAllViewers runs on every navigation, tail or no tail.
+  if (tailing) window.api.unwatchSessionTranscript(tailing.sessionId);
+}
+
+function closeJsonlViewer() {
+  stopJsonlTail();
+  restoreMainArea();
+}
+
+function onTranscriptChanged(sessionId) {
+  if (!jsonlTail.session || jsonlTail.session.sessionId !== sessionId) return;
+  updateJsonlView();
+}
+
+async function updateJsonlView() {
+  if (jsonlTailBusy) { jsonlTailPending = true; return; }
+  jsonlTailBusy = true;
+  try {
+    do {
+      jsonlTailPending = false;
+      await jsonlTailPass();
+    } while (jsonlTailPending);
+  } finally {
+    jsonlTailBusy = false;
+  }
+}
+
+// One pass of the tail: read what is new, then rebuild the DOM from the unsettled
+// boundary down. Every invariant that keeps an append from disturbing the view lives
+// here — the generation check, the scroll measurement, and the render boundary.
+async function jsonlTailPass() {
+  const state = jsonlTail;
+  const session = state.session;
+  if (!session) return;
+  const gen = state.gen;
+
+  const result = await window.api.readSessionTail(session.sessionId, state.cursor);
+  // Another session was opened, or the view closed, while we were awaiting.
+  if (gen !== state.gen) return;
+
   if (result.error) {
-    jsonlViewerBody.innerHTML = '<div class="plans-empty">Error loading messages: ' + escapeHtml(result.error) + '</div>';
+    // Mid-tail this is transient — the other process may be rewriting the file, and
+    // the next change event brings it back. Leave whatever is on screen alone.
+    if (!state.raw.length) {
+      state.nodes = [];
+      jsonlViewerBody.innerHTML = '<div class="plans-empty">No messages to show yet.</div>';
+    }
     return;
   }
 
-  const rawEntries = result.entries || [];
+  // Measured before any DOM change: appending moves scrollHeight, so a reading taken
+  // afterwards can no longer tell whether the view was following the bottom.
+  const wasAtBottom = jsonlViewerBody.scrollHeight - jsonlViewerBody.scrollTop
+    - jsonlViewerBody.clientHeight <= 24;
 
-  // Merge consecutive local command entries (caveat + bash-input + stdout/stderr)
-  const entries = mergeLocalCommandEntries(rawEntries);
+  state.cursor = result.cursor;
+  const entries = result.entries || [];
 
-  // Build tool_use_id → result content map so results render under their tool call
+  if (result.reset) {
+    // The file was truncated or rewritten — everything we had may be stale prefix.
+    state.raw = entries;
+    state.safeFrom = 0;
+  } else {
+    if (!entries.length) return;
+    state.raw = state.raw.concat(entries);
+  }
+
+  // Both whole-list passes re-run over the whole entry list every time: a regex walk
+  // and a Map build, no DOM. Only the render below is incremental.
+  const merged = mergeLocalCommandEntries(state.raw);
   const toolResultMap = new Map();
-  for (const entry of entries) {
-    const blocks = entry.message?.content || entry.content;
+  for (const el of merged) {
+    const blocks = el.entry.message?.content || el.entry.content;
     if (!Array.isArray(blocks)) continue;
     for (const block of blocks) {
       if (block.type === 'tool_result' && block.tool_use_id) {
@@ -585,18 +737,33 @@ async function showJsonlViewer(session) {
       }
     }
   }
+  // Captured before rendering: renderJsonlEntry claims results out of the map as it
+  // goes, and computeSafeFrom needs to know which ones exist at all.
+  const resultIds = new Set(toolResultMap.keys());
+  const newSafeFrom = computeSafeFrom(merged, resultIds, state.raw.length);
 
-  let rendered = 0;
-  for (const entry of entries) {
-    const el = renderJsonlEntry(entry, toolResultMap);
-    if (el) {
-      jsonlViewerBody.appendChild(el);
-      rendered++;
-    }
+  // Whichever boundary is lower: entries that were unsettled last pass still need
+  // replacing, even if they have settled since.
+  const renderFrom = Math.min(state.safeFrom, newSafeFrom);
+  state.safeFrom = newSafeFrom;
+
+  while (state.nodes.length && state.nodes[state.nodes.length - 1].from >= renderFrom) {
+    state.nodes.pop().el.remove();
+  }
+  // Nothing of ours is left in the body, so whatever else is in it — the empty-state
+  // placeholder — has to go before anything is appended below it.
+  if (!state.nodes.length) jsonlViewerBody.innerHTML = '';
+
+  for (const el of merged) {
+    if (el.from < renderFrom) continue;
+    const node = renderJsonlEntry(el.entry, toolResultMap);
+    if (!node) continue;
+    jsonlViewerBody.appendChild(node);
+    state.nodes.push({ from: el.from, el: node });
   }
 
-  if (rendered === 0) {
-    jsonlViewerBody.innerHTML = '<div class="plans-empty">No messages found in this session.</div>';
+  if (!state.nodes.length) {
+    jsonlViewerBody.innerHTML = '<div class="plans-empty">No messages to show yet.</div>';
   }
 
   // Click-to-fullscreen for inline images
@@ -612,6 +779,19 @@ async function showJsonlViewer(session) {
     };
   });
 
-  // Scroll to the bottom so the most recent messages are visible
-  jsonlViewerBody.scrollTop = jsonlViewerBody.scrollHeight;
+  // Follow the tail only if the view was already at the bottom, so reading back
+  // through a session is never yanked forward by the other process writing.
+  if (wasAtBottom) jsonlViewerBody.scrollTop = jsonlViewerBody.scrollHeight;
+}
+
+// Wired once at load. Guarded so this file can also be required in Node for the
+// unit tests, where there is no window and no preload bridge.
+if (typeof window !== 'undefined' && window.api && window.api.onTranscriptChanged) {
+  window.api.onTranscriptChanged(onTranscriptChanged);
+}
+
+// Expose the pure list/boundary helpers to Node for unit testing. No-op in the
+// browser, where this file is loaded as a plain <script> and `module` is undefined.
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { mergeLocalCommandEntries, computeSafeFrom, getEntryText, UNSETTLED_TOOL_WINDOW };
 }

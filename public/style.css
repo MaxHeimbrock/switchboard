@@ -946,6 +946,7 @@ body { display: flex; flex-direction: column; }
 }
 
 .session-stop-btn,
+.session-resume-btn,
 .session-launch-config-btn,
 .session-jsonl-btn,
 .session-unread-btn,
@@ -966,6 +967,7 @@ body { display: flex; flex-direction: column; }
   color: #9b4058;
 }
 
+.session-resume-btn,
 .session-launch-config-btn {
   color: #5a7a6a;
   outline: none;
@@ -988,6 +990,7 @@ body { display: flex; flex-direction: column; }
   background: rgba(224,80,112,0.1);
 }
 
+.session-resume-btn:hover,
 .session-launch-config-btn:hover {
   color: #3ecf5a;
   background: rgba(62,207,90,0.1);
@@ -1012,6 +1015,12 @@ body { display: flex; flex-direction: column; }
 }
 
 .session-item.has-running-pty .session-launch-config-btn {
+  display: none;
+}
+
+/* Resume mirrors stop: offered while nothing runs here, gone once Switchboard owns
+   the PTY — at which point a click already shows the terminal. */
+.session-item.has-running-pty .session-resume-btn {
   display: none;
 }
 
@@ -2201,6 +2210,37 @@ body { display: flex; flex-direction: column; }
   font-size: 10px;
   color: #6a6a80;
   font-family: 'SF Mono', 'Fira Code', Menlo, monospace;
+}
+
+#jsonl-viewer-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+}
+
+#jsonl-viewer-resume-btn,
+#jsonl-viewer-close-btn {
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 4px;
+  line-height: 1;
+  transition: all 0.15s;
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #6a6a80;
+}
+
+#jsonl-viewer-resume-btn:hover {
+  color: #3ecf5a;
+  background: rgba(62,207,90,0.1);
+}
+
+#jsonl-viewer-close-btn:hover {
+  color: #e05070;
+  background: rgba(224,80,112,0.1);
 }
 
 #jsonl-viewer-body {

@@ -21,7 +21,9 @@ contextBridge.exposeInMainWorld('api', {
   archiveSession: (id, archived) => ipcRenderer.invoke('archive-session', id, archived),
   openTerminal: (id, projectPath, isNew, sessionOptions) => ipcRenderer.invoke('open-terminal', id, projectPath, isNew, sessionOptions),
   search: (type, query, titleOnly) => ipcRenderer.invoke('search', type, query, titleOnly),
-  readSessionJsonl: (sessionId) => ipcRenderer.invoke('read-session-jsonl', sessionId),
+  readSessionTail: (sessionId, cursor) => ipcRenderer.invoke('read-session-tail', sessionId, cursor),
+  watchSessionTranscript: (sessionId) => ipcRenderer.invoke('watch-session-transcript', sessionId),
+  unwatchSessionTranscript: (sessionId) => ipcRenderer.invoke('unwatch-session-transcript', sessionId),
 
   // Settings
   getSetting: (key) => ipcRenderer.invoke('get-setting', key),
@@ -111,5 +113,8 @@ contextBridge.exposeInMainWorld('api', {
   unwatchFile: (filePath) => ipcRenderer.invoke('unwatch-file', filePath),
   onFileChanged: (callback) => {
     ipcRenderer.on('file-changed', (_event, filePath) => callback(filePath));
+  },
+  onTranscriptChanged: (callback) => {
+    ipcRenderer.on('transcript-changed', (_event, sessionId) => callback(sessionId));
   },
 });

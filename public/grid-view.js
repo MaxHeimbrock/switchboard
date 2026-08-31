@@ -245,6 +245,8 @@ function showGridView() {
   settingsViewer.style.display = 'none';
   jsonlViewer.style.display = 'none';
   terminalArea.style.display = '';
+  // Hidden by hand rather than through hideAllViewers, so the tail is stopped here too.
+  stopJsonlTail();
 
   // Switch #terminals to grid layout
   terminalsEl.classList.add('grid-layout');

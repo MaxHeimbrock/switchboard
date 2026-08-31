@@ -556,7 +556,13 @@ function rebindSidebarEvents(projects) {
     const session = sessionMap.get(sessionId);
     if (!session) return;
 
-    item.onclick = () => openSession(session);
+    // Reading is the default; resuming is deliberate. Locked-elsewhere and
+    // not-running rows share the transcript branch, so no click can raise the
+    // "already open in another shell" dialog — only the resume button can.
+    item.onclick = () => {
+      if (session.type === 'terminal' || isRunningHere(session.sessionId)) openSession(session);
+      else showJsonlViewer(session);
+    };
 
     const pin = item.querySelector('.session-pin');
     if (pin) {
@@ -591,6 +597,14 @@ function rebindSidebarEvents(projects) {
           markUnread(session.sessionId);
         }
         refreshSidebar();
+      };
+    }
+
+    const resumeBtn = item.querySelector('.session-resume-btn');
+    if (resumeBtn) {
+      resumeBtn.onclick = (e) => {
+        e.stopPropagation();
+        openSession(session);
       };
     }
 
@@ -725,6 +739,14 @@ function buildSessionItem(session) {
   jsonlBtn.title = 'View messages';
   jsonlBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9a2 2 0 0 1-2 2H6l-4 4V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2z"/><path d="M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1"/></svg>';
 
+  // The resume the row's click used to do, now that a click reads the transcript
+  // instead. Hidden by CSS once Switchboard owns the PTY, where a click already
+  // shows the terminal.
+  const resumeBtn = document.createElement('button');
+  resumeBtn.className = 'session-resume-btn';
+  resumeBtn.title = 'Resume session';
+  resumeBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><path d="M3.5 2.2v7.6a.5.5 0 0 0 .77.42l6-3.8a.5.5 0 0 0 0-.84l-6-3.8a.5.5 0 0 0-.77.42z"/></svg>';
+
   const launchConfigBtn = document.createElement('button');
   launchConfigBtn.className = 'session-launch-config-btn';
   launchConfigBtn.title = 'Resume with config';
@@ -741,6 +763,7 @@ function buildSessionItem(session) {
   if (session.type !== 'terminal') {
     actions.appendChild(jsonlBtn);
     actions.appendChild(archiveBtn);
+    actions.appendChild(resumeBtn);
     actions.appendChild(launchConfigBtn);
   }
 

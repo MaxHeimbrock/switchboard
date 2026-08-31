@@ -40,6 +40,7 @@ const { discoverShellProfiles, getShellProfiles, resolveShell, isWindows, isWslS
 const { startScheduler } = require('./schedule-runner');
 const { encodeProjectPath } = require('./encode-project-path');
 const { skillDisplayName } = require('./skill-name');
+const { readSessionTail } = require('./read-session-tail');
 
 
 // --- Auto-updater (only in packaged builds) ---
@@ -421,6 +422,56 @@ ipcMain.handle('unwatch-file', (_event, filePath) => {
     watcher.close();
     fileWatchers.delete(resolved);
   }
+  return { ok: true };
+});
+
+// ── Transcript Watching (for the read-only transcript view) ──────────
+//
+// A single slot, deliberately not an entry in `fileWatchers`: only one transcript
+// is ever on screen, `unwatch-file` closes a path unconditionally, and that map is
+// shared with the ViewerPanels — so a transcript and a panel watching the same
+// file would close each other's watcher.
+let transcriptWatch = null; // { sessionId, watcher, debounce } | null
+
+function closeTranscriptWatch() {
+  if (!transcriptWatch) return;
+  if (transcriptWatch.debounce) clearTimeout(transcriptWatch.debounce);
+  try { transcriptWatch.watcher.close(); } catch {}
+  transcriptWatch = null;
+}
+
+ipcMain.handle('watch-session-transcript', (_event, sessionId) => {
+  closeTranscriptWatch();
+  const folder = getCachedFolder(sessionId);
+  if (!folder) return { ok: false, error: 'Session not found in cache' };
+  const jsonlPath = path.join(PROJECTS_DIR, folder, sessionId + '.jsonl');
+  try {
+    // No eventType filter, unlike watch-file: a truncation or a compaction surfaces
+    // as 'rename' on macOS, and re-rendering for that is the whole point.
+    const slot = { sessionId, watcher: null, debounce: null };
+    slot.watcher = fs.watch(jsonlPath, () => {
+      if (transcriptWatch !== slot) return;
+      if (slot.debounce) clearTimeout(slot.debounce);
+      slot.debounce = setTimeout(() => {
+        slot.debounce = null;
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('transcript-changed', sessionId);
+        }
+      }, 300);
+    });
+    transcriptWatch = slot;
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('unwatch-session-transcript', (_event, sessionId) => {
+  // A stop for a transcript that is no longer the one on screen is spent: reopening
+  // closes the old slot itself, and honouring the stale stop would take the new
+  // watcher down with it.
+  if (sessionId && transcriptWatch && transcriptWatch.sessionId !== sessionId) return { ok: true };
+  closeTranscriptWatch();
   return { ok: true };
 });
 
@@ -976,24 +1027,22 @@ ipcMain.handle('rename-session', (_event, sessionId, name) => {
   return { name: name || null };
 });
 
-// --- IPC: archive-session ---
-ipcMain.handle('read-session-jsonl', (_event, sessionId) => {
+// --- IPC: read-session-tail ---
+// Incremental: the renderer hands back the cursor from its last read and gets only
+// what has been appended since, so a live-tailing transcript view costs one small
+// read per change instead of the whole file.
+ipcMain.handle('read-session-tail', (_event, sessionId, cursor) => {
   const folder = getCachedFolder(sessionId);
   if (!folder) return { error: 'Session not found in cache' };
   const jsonlPath = path.join(PROJECTS_DIR, folder, sessionId + '.jsonl');
   try {
-    const content = fs.readFileSync(jsonlPath, 'utf-8');
-    const entries = [];
-    for (const line of content.split('\n')) {
-      if (!line.trim()) continue;
-      try { entries.push(JSON.parse(line)); } catch {}
-    }
-    return { entries };
+    return readSessionTail(jsonlPath, cursor);
   } catch (err) {
     return { error: err.message };
   }
 });
 
+// --- IPC: archive-session ---
 ipcMain.handle('archive-session', (_event, sessionId, archived) => {
   const val = archived ? 1 : 0;
   setArchived(sessionId, val);

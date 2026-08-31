@@ -76,6 +76,10 @@ let showTodayOnly = false;
 let cachedProjects = [];
 let cachedAllProjects = [];
 let activePtyIds = new Set();
+// sessionId → { pid, name, status, kind, label } for sessions live in a `claude`
+// process we do not own. Filled by pollActiveSessions; the marking derived from it
+// is only a hint — openSession re-checks at click time, which is the truth.
+let lockedSessions = new Map();
 let sortedOrder = []; // [{ projectPath, itemIds: [itemId, ...] }, ...] — single source of truth for sidebar order
 let activeTab = 'sessions';
 let cachedPlans = [];
@@ -560,6 +564,7 @@ async function pollActiveSessions() {
   try {
     const ids = await window.api.getActiveSessions();
     activePtyIds = new Set(ids);
+    lockedSessions = new Map(Object.entries(await window.api.getSessionLocks()));
     updateRunningIndicators();
     updateTerminalHeader();
   } catch {}
@@ -577,6 +582,14 @@ function updateRunningIndicators() {
       responseReadySessions.delete(id);
       sessionBusyState.delete(id);
     }
+    // Locked = live in a `claude` process that is not ours. Only meaningful for the
+    // not-running set, so it never competes with the needs-attention → cli-busy →
+    // running precedence. Must be a toggle in this same pass: the branch above strips
+    // the other state classes from exactly the sessions locked lives among.
+    const holder = !running ? lockedSessions.get(id) : null;
+    item.classList.toggle('locked-elsewhere', !!holder);
+    if (holder) item.title = lockedTitle(holder);
+    else if (item.title) item.removeAttribute('title');
     const dot = item.querySelector('.session-status-dot');
     if (dot) dot.classList.toggle('running', running);
   });
@@ -590,10 +603,11 @@ function updateRunningIndicators() {
   for (const [sid, card] of gridCards) {
     const running = activePtyIds.has(sid);
     const busy = sessionBusyState.get(sid) || false;
+    const locked = !running && lockedSessions.has(sid);
     const dot = card.querySelector('.grid-card-dot');
-    if (dot) dot.className = 'grid-card-dot ' + (busy ? 'busy' : (running ? 'running' : 'stopped'));
+    if (dot) dot.className = 'grid-card-dot ' + (busy ? 'busy' : (running ? 'running' : (locked ? 'locked' : 'stopped')));
     const footer = card.querySelector('.grid-card-footer');
-    if (footer) footer.children[0].textContent = running ? 'Running' : 'Stopped';
+    if (footer) footer.children[0].textContent = running ? 'Running' : (locked ? 'Elsewhere' : 'Stopped');
     const stopBtn = card.querySelector('.grid-card-stop-btn');
     if (stopBtn) stopBtn.style.display = running ? '' : 'none';
   }
@@ -813,6 +827,20 @@ async function openSession(session, customOptions) {
       return;
     }
   }
+
+  // Refuse to resume a session another `claude` process is holding. Re-checked here
+  // rather than trusted from the poll — the marking can be up to ~30s stale — and
+  // placed above createTerminalEntry so no pane is added and no PTY is spawned.
+  try {
+    const holder = (await window.api.getSessionLocks())[sessionId];
+    if (holder) {
+      lockedSessions.set(sessionId, holder);
+      updateRunningIndicators();
+      showSessionLockedDialog(session, holder);
+      return;
+    }
+    lockedSessions.delete(sessionId);
+  } catch {} // unreadable registry — resume exactly as before
 
   // Create new terminal entry (hidden until showSession)
   const entry = createTerminalEntry(session);

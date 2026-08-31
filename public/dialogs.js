@@ -1,7 +1,8 @@
 // --- Dialogs & session launch helpers ---
 // Depends on globals: launchNewSession, cachedProjects, cachedAllProjects, sessionMap,
 // pendingSessions, openSessions, activePtyIds, refreshSidebar, pollActiveSessions (app.js)
-// Depends on: ICONS (icons.js)
+// Depends on: ICONS (icons.js), escapeHtml, cleanDisplayName,
+// LOCKED_ELSEWHERE_TITLE (utils.js)
 
 // --- New session dialog ---
 async function resolveDefaultSessionOptions(project) {
@@ -404,6 +405,48 @@ async function showResumeSessionDialog(session) {
   function onKey(e) {
     if (e.key === 'Escape') close();
     if (e.key === 'Enter' && !e.target.matches('input')) resume();
+  }
+  document.addEventListener('keydown', onKey);
+}
+
+// --- Session locked elsewhere ---
+// Shown instead of opening a session another `claude` process is holding. A hard block:
+// resuming anyway would put two processes on one transcript, so there is no override,
+// and `busy` and `idle` holders are treated identically.
+function showSessionLockedDialog(session, holder) {
+  const overlay = document.createElement('div');
+  overlay.className = 'new-session-overlay';
+
+  const dialog = document.createElement('div');
+  dialog.className = 'new-session-dialog session-locked-dialog';
+
+  const sessionName = session.name || session.aiTitle || session.summary || session.sessionId.slice(0, 8);
+
+  dialog.innerHTML = `
+    <h3>${escapeHtml(LOCKED_ELSEWHERE_TITLE)}</h3>
+    <div class="session-locked-body">
+      <div class="session-locked-name">${escapeHtml(cleanDisplayName(sessionName) || sessionName)}</div>
+      <div class="session-locked-holder">${escapeHtml(holder.label)}</div>
+      <div class="session-locked-hint">Two Claude processes on one session would both append to its transcript. Quit it there first.</div>
+    </div>
+    <div class="new-session-actions">
+      <button class="new-session-cancel-btn">OK</button>
+    </div>
+  `;
+
+  overlay.appendChild(dialog);
+  document.body.appendChild(overlay);
+
+  function close() {
+    overlay.remove();
+    document.removeEventListener('keydown', onKey);
+  }
+
+  dialog.querySelector('.new-session-cancel-btn').onclick = close;
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+  function onKey(e) {
+    if (e.key === 'Escape' || e.key === 'Enter') close();
   }
   document.addEventListener('keydown', onKey);
 }

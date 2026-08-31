@@ -79,3 +79,13 @@ function escapeHtml(str) {
 function shellEscape(path) {
   return "'" + path.replace(/'/g, "'\\''") + "'";
 }
+
+// A session live in a `claude` process Switchboard does not own. The renderer cannot
+// require claude-sessions.js, so this mirrors its LOCKED_TITLE — change both together.
+// holder.label, by contrast, is built once in main and shipped over IPC, so the
+// pid/name/status wording has no second copy here.
+const LOCKED_ELSEWHERE_TITLE = 'Already open in another shell';
+
+function lockedTitle(holder) {
+  return LOCKED_ELSEWHERE_TITLE + ' — ' + holder.label;
+}

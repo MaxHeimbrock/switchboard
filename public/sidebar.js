@@ -1,10 +1,10 @@
 // --- Sidebar rendering ---
 // Depends on globals: sidebarContent, openSessions, activeSessionId, activePtyIds,
-// pendingSessions, sessionMap, sortedOrder, searchMatchIds,
+// lockedSessions, pendingSessions, sessionMap, sortedOrder, searchMatchIds,
 // searchMatchProjectPaths, showStarredOnly, showRunningOnly, showTodayOnly,
 // visibleSessionCount, sessionMaxAgeDays, attentionSessions, responseReadySessions,
 // sessionBusyState, cachedProjects, cachedAllProjects, gridCards, gridViewActive (app.js)
-// Depends on: cleanDisplayName, formatDate, escapeHtml (utils.js), ICONS (icons.js),
+// Depends on: cleanDisplayName, formatDate, escapeHtml, lockedTitle (utils.js), ICONS (icons.js),
 // showSession (terminal-manager.js), confirmAndStopSession, pollActiveSessions,
 // showNewSessionPopover, openSettingsViewer, showResumeSessionDialog,
 // showJsonlViewer, openSession, loadProjects, markUnread,
@@ -647,6 +647,14 @@ function buildSessionItem(session) {
   if (attentionSessions.has(session.sessionId)) item.classList.add('needs-attention');
   if (responseReadySessions.has(session.sessionId)) item.classList.add('response-ready');
   if (sessionBusyState.get(session.sessionId)) item.classList.add('cli-busy');
+  // Set at build time as well as in updateRunningIndicators: renderProjects morphs from
+  // a fresh tree, keeping only collapse/rename state, so a class applied only on the
+  // poll tick would vanish on the next refreshSidebar (a rename, say).
+  const lockHolder = !activePtyIds.has(session.sessionId) ? lockedSessions.get(session.sessionId) : null;
+  if (lockHolder) {
+    item.classList.add('locked-elsewhere');
+    item.title = lockedTitle(lockHolder);
+  }
   item.dataset.sessionId = session.sessionId;
 
   const modified = new Date(session.modified);

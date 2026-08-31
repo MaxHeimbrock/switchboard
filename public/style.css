@@ -816,6 +816,17 @@ body { display: flex; flex-direction: column; }
   background: #3ecf5a;
 }
 
+/* ---- Locked elsewhere: live in a `claude` process Switchboard doesn't own ---- */
+/* A filled violet dot — same solid shape as the green running dot, told apart by hue,
+   and unlike the cli-busy ring, which is hollow, broken at the top and spins. Only ever
+   set on rows that are NOT running, so it never has to out-specify those states. */
+.session-item.locked-elsewhere .session-status-dot {
+  background: #a78bfa;
+  border: none;
+  box-shadow: none;
+  animation: none;
+}
+
 @keyframes pulse-dot {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
@@ -1414,6 +1425,14 @@ body { display: flex; flex-direction: column; }
 }
 
 .grid-card-dot.stopped { background: #6a6a80; }
+
+/* Filled violet, matching the sidebar. No glow: `running` above has one, so the
+   presence/absence of the halo is a second cue on top of the hue. */
+.grid-card-dot.locked {
+  background: #a78bfa;
+  border: none;
+  box-shadow: none;
+}
 
 .grid-card-dot.busy {
   background: #3ecf5a;
@@ -3357,6 +3376,40 @@ body { display: flex; flex-direction: column; }
   color: #d0d0e8;
   font-weight: 600;
   margin-bottom: 20px;
+}
+
+/* ---- Session locked elsewhere dialog ---- */
+/* .new-session-dialog above supplies the frame; this only narrows it and styles the
+   one-block body, since there are no settings-fields to lay out. */
+.session-locked-dialog {
+  width: 420px;
+}
+
+.session-locked-body {
+  background: rgba(255,255,255,0.02);
+  border: 1px solid rgba(255,255,255,0.035);
+  border-radius: 10px;
+  padding: 14px 18px;
+}
+
+.session-locked-name {
+  font-size: 13px;
+  color: #d0d0e8;
+  font-weight: 500;
+  margin-bottom: 6px;
+}
+
+.session-locked-holder {
+  font-size: 12px;
+  color: #a78bfa;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  margin-bottom: 10px;
+}
+
+.session-locked-hint {
+  font-size: 12px;
+  color: #8888a0;
+  line-height: 1.5;
 }
 
 .new-session-dialog .settings-field {

@@ -8,6 +8,7 @@ const log = require('electron-log');
 // getFolderIndexMtimeMs moved to session-cache.js
 const { startMcpServer, shutdownMcpServer, shutdownAll: shutdownAllMcp, resolvePendingDiff, rekeyMcpServer, cleanStaleLockFiles } = require('./mcp-bridge');
 const { fetchAndTransformUsage } = require('./claude-auth');
+const { getExternalSessions, holderLabel, LOCKED_TITLE } = require('./claude-sessions');
 
 // SWITCHBOARD_DATA_DIR isolates a dev/test instance from the installed app:
 // db.js puts switchboard.db under it, and pointing userData there gives the
@@ -903,6 +904,43 @@ ipcMain.handle('get-active-sessions', () => {
   return active;
 });
 
+// --- IPC: get-session-locks ---
+// Sessions live in a `claude` process this instance does not own. Resuming one of
+// these would put two processes on the same transcript, so both the sidebar marking
+// and the click-time guard read this. Kept separate from get-active-sessions so that
+// handler's string[] shape — consumed directly by pollActiveSessions — is untouched.
+async function collectSessionLocks() {
+  const ownSessionIds = new Set();
+  const ownPtyPids = new Set();
+  for (const [sessionId, session] of activeSessions) {
+    if (session.exited) continue;
+    ownSessionIds.add(sessionId);
+    if (session.realSessionId) ownSessionIds.add(session.realSessionId);
+    if (session.pty?.pid) ownPtyPids.add(session.pty.pid);
+  }
+  const locks = await getExternalSessions({ ownSessionIds, ownPtyPids, log });
+  const out = {};
+  for (const [sessionId, holder] of locks) {
+    out[sessionId] = {
+      pid: holder.pid,
+      name: holder.name,
+      status: holder.status,
+      kind: holder.kind,
+      label: holderLabel(sessionId, holder),
+    };
+  }
+  return out;
+}
+
+ipcMain.handle('get-session-locks', async () => {
+  try {
+    return await collectSessionLocks();
+  } catch (err) {
+    log.warn('[locks] get-session-locks failed:', err.message);
+    return {};
+  }
+});
+
 // --- IPC: get-active-terminals --- (plain terminal sessions for renderer restore)
 ipcMain.handle('get-active-terminals', () => {
   const terminals = [];
@@ -989,6 +1027,22 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
     }
 
     return { ok: true, reattached: true, mcpActive: !!session.mcpServer };
+  }
+
+  // Backstop for the renderer's own guard (openSession in public/app.js): refuse to
+  // resume an id another `claude` process is holding. Only for resumes of an existing
+  // id — a fresh id, or a plain terminal, can never collide. Nothing has been spawned
+  // at this point, so returning here leaves no PTY and no transcript write behind.
+  if (isNew === false && sessionOptions?.type !== 'terminal') {
+    try {
+      const holder = (await collectSessionLocks())[sessionId];
+      if (holder) {
+        log.info(`[locks] refused resume of ${sessionId} — held by pid ${holder.pid}`);
+        return { ok: false, locked: true, holder, error: `${LOCKED_TITLE} \u2014 ${holder.label}` };
+      }
+    } catch (err) {
+      log.warn('[locks] backstop check failed, resuming unguarded:', err.message);
+    }
   }
 
   // Spawn new PTY

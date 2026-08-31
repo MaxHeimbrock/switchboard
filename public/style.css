@@ -817,12 +817,12 @@ body { display: flex; flex-direction: column; }
 }
 
 /* ---- Locked elsewhere: live in a `claude` process Switchboard doesn't own ---- */
-/* A hollow, complete ring — unlike the filled running/attention dots and unlike the
-   cli-busy ring, which is broken at the top and spins. Only ever set on rows that are
-   NOT running, so it never has to out-specify those states. */
+/* A filled violet dot — same solid shape as the green running dot, told apart by hue,
+   and unlike the cli-busy ring, which is hollow, broken at the top and spins. Only ever
+   set on rows that are NOT running, so it never has to out-specify those states. */
 .session-item.locked-elsewhere .session-status-dot {
-  background: transparent;
-  border: 1.5px solid #a78bfa;
+  background: #a78bfa;
+  border: none;
   box-shadow: none;
   animation: none;
 }
@@ -1426,9 +1426,11 @@ body { display: flex; flex-direction: column; }
 
 .grid-card-dot.stopped { background: #6a6a80; }
 
+/* Filled violet, matching the sidebar. No glow: `running` above has one, so the
+   presence/absence of the halo is a second cue on top of the hue. */
 .grid-card-dot.locked {
-  background: transparent;
-  border: 1.5px solid #a78bfa;
+  background: #a78bfa;
+  border: none;
   box-shadow: none;
 }
 

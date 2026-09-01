@@ -126,8 +126,12 @@ class ViewerPanel {
 
   /**
    * Open a file in the viewer.
+   *
+   * @param {Object} opts
+   * @param {string} opts.findQuery - Open the find bar on this query, positioned on the
+   *   first match. Forces edit mode, since a markdown preview has no find bar to open.
    */
-  open(title, filePath, content) {
+  open(title, filePath, content, opts = {}) {
     this._unwatchFile();
 
     this.filePath = filePath;
@@ -172,9 +176,17 @@ class ViewerPanel {
       });
     }
 
-    // Re-apply preview preference
-    if (wantPreview) {
+    // Re-apply preview preference — unless we are jumping to a search hit, which needs
+    // the editor rather than the rendered preview. localStorage is left untouched, so
+    // the preference comes back on the next ordinary open.
+    if (wantPreview && !opts.findQuery) {
       this._setPreview(true);
+    }
+
+    // After the wrap reconfigure above, so the bar's scroll-into-view lands on the
+    // layout the reader will actually see.
+    if (opts.findQuery && this.editorView && window.cmOpenSearch) {
+      window.cmOpenSearch(this.editorView, opts.findQuery);
     }
 
     // Watch for external changes

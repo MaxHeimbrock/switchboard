@@ -103,6 +103,31 @@ window._applyTerminalTheme = (themeName) => {
 let searchMatchIds = null; // null = no search active; Set<string> = matched session IDs
 let searchMatchProjectPaths = null; // Set<string> of project paths matched by name
 
+// --- Full-text hit counts ---
+//
+// id → number of times the active query occurs in that item's content, zeros dropped.
+// One piece of state answers both questions the spec asks: whether to draw a badge on
+// the card, and whether clicking it should jump to the first occurrence. A card that
+// matched on its title alone never lands here, so it gets neither.
+const searchHitCounts = new Map();
+let searchQueryText = ''; // the query the counts belong to, and what a jump pre-fills
+let searchPlanMatchIds = null; // kept so a badge re-render can re-filter without re-running FTS
+let searchMemoryMatchIds = null;
+let searchCountToken = 0; // drops a count reply the user has already typed past
+
+// The one condition behind both the badge and the jump: a count arrived and it is > 0.
+function searchJumpOpts(id) {
+  return searchHitCounts.get(id) > 0 ? { findQuery: searchQueryText } : {};
+}
+
+function resetHitCounts() {
+  searchHitCounts.clear();
+  searchQueryText = '';
+  searchPlanMatchIds = null;
+  searchMemoryMatchIds = null;
+  searchCountToken++;
+}
+
 // --- Activity tracking ---
 //
 // Activity is determined by two signals:
@@ -464,6 +489,9 @@ searchTitlesToggle.addEventListener('click', async () => {
   searchTitlesOnly = !searchTitlesOnly;
   searchTitlesToggle.classList.toggle('active', searchTitlesOnly);
   await window.api.setSetting('searchTitlesOnly', searchTitlesOnly);
+  // Titles-only means no badges at all, so drop the counts before the re-run below
+  // rather than leaving the previous query's badges on screen through it.
+  resetHitCounts();
   // Re-run current search if there's a query
   const query = searchInput.value.trim();
   if (query) {
@@ -475,6 +503,7 @@ function clearSearch() {
   searchInput.value = '';
   searchBar.classList.remove('has-query');
   if (searchDebounceTimer) { clearTimeout(searchDebounceTimer); searchDebounceTimer = null; }
+  resetHitCounts();
   if (activeTab === 'sessions') {
     searchMatchIds = null;
     searchMatchProjectPaths = null;
@@ -505,6 +534,11 @@ searchInput.addEventListener('input', () => {
       return;
     }
 
+    // Dropped before the list is rendered, not after the counts come back: the badges
+    // on screen belong to the previous query and would otherwise survive this paint.
+    resetHitCounts();
+    searchQueryText = query;
+
     try {
       if (activeTab === 'sessions') {
         const results = await window.api.search('session', query, searchTitlesOnly);
@@ -522,14 +556,17 @@ searchInput.addEventListener('input', () => {
           }
         }
         refreshSidebar({ resort: true });
+        await applyHitCounts('session', [...searchMatchIds]);
       } else if (activeTab === 'plans') {
         const results = await window.api.search('plan', query, searchTitlesOnly);
-        const matchIds = new Set(results.map(r => r.id));
-        renderPlans(cachedPlans.filter(p => matchIds.has(p.filename)));
+        searchPlanMatchIds = new Set(results.map(r => r.id));
+        renderPlans(cachedPlans.filter(p => searchPlanMatchIds.has(p.filename)));
+        await applyHitCounts('plan', [...searchPlanMatchIds]);
       } else if (activeTab === 'memory') {
         const results = await window.api.search('memory', query, searchTitlesOnly);
-        const matchIds = new Set(results.map(r => r.id));
-        renderMemories(matchIds);
+        searchMemoryMatchIds = new Set(results.map(r => r.id));
+        renderMemories(searchMemoryMatchIds);
+        await applyHitCounts('memory', [...searchMemoryMatchIds]);
       }
     } catch {
       if (activeTab === 'sessions') {
@@ -540,6 +577,31 @@ searchInput.addEventListener('input', () => {
     }
   }, 200);
 });
+
+// Badges are deliberately a second pass. The filtered list paints on the FTS result
+// alone, then the counts — which have to read every matching file in main — land on
+// top of it a moment later and the tab is re-rendered from `searchHitCounts`. A reply
+// the user has already typed past is dropped by the token rather than drawn.
+async function applyHitCounts(type, ids) {
+  if (searchTitlesOnly || !ids.length) return;
+  const token = ++searchCountToken;
+  let counts;
+  try {
+    counts = await window.api.countOccurrences(type, ids, searchQueryText);
+  } catch {
+    return;
+  }
+  if (token !== searchCountToken) return;
+  for (const [id, n] of Object.entries(counts)) {
+    if (n > 0) searchHitCounts.set(id, n);
+  }
+  // Nothing matched in any body — the list on screen is already right.
+  if (!searchHitCounts.size) return;
+  // No resort: badges must never reorder the list or change what is in it.
+  if (type === 'session') refreshSidebar();
+  else if (type === 'plan') renderPlans(cachedPlans.filter(p => searchPlanMatchIds.has(p.filename)));
+  else renderMemories(searchMemoryMatchIds);
+}
 
 // --- Stop session helper ---
 async function confirmAndStopSession(sessionId) {
@@ -934,6 +996,7 @@ document.querySelectorAll('.sidebar-tab').forEach(tab => {
     searchBar.classList.remove('has-query');
     searchMatchIds = null;
     searchMatchProjectPaths = null;
+    resetHitCounts();
 
     // Hide all sidebar content areas
     sidebarContent.style.display = 'none';

@@ -1,8 +1,8 @@
 // --- Plans & Memory viewers ---
 // Depends on globals: cachedPlans, plansContent, planPanel, planViewer,
 // memoryContent, memoryPanel, memoryViewer, placeholder, terminalArea,
-// statsViewer, settingsViewer, jsonlViewer (app.js)
-// Depends on: formatDate (utils.js)
+// statsViewer, settingsViewer, jsonlViewer, searchJumpOpts (app.js)
+// Depends on: formatDate, searchHitBadge (utils.js)
 
 let currentPlanContent = "";
 let currentPlanFilePath = "";
@@ -53,7 +53,11 @@ function buildPlanItem(plan) {
 
   const metaEl = document.createElement('div');
   metaEl.className = 'session-meta';
-  metaEl.textContent = formatDate(new Date(plan.modified));
+  // The date gets its own span so the search badge can sit beside it rather than
+  // inside a bare text node.
+  const dateEl = document.createElement('span');
+  dateEl.textContent = formatDate(new Date(plan.modified));
+  metaEl.append(dateEl, searchHitBadge(plan.filename));
 
   info.appendChild(titleEl);
   info.appendChild(filenameEl);
@@ -61,11 +65,11 @@ function buildPlanItem(plan) {
   row.appendChild(info);
   item.appendChild(row);
 
-  item.addEventListener('click', () => openPlan(plan));
+  item.addEventListener('click', () => openPlan(plan, searchJumpOpts(plan.filename)));
   return item;
 }
 
-async function openPlan(plan) {
+async function openPlan(plan, opts = {}) {
   // Mark active in sidebar
   plansContent.querySelectorAll('.plan-item.active').forEach(el => el.classList.remove('active'));
   const items = plansContent.querySelectorAll('.plan-item');
@@ -88,7 +92,7 @@ async function openPlan(plan) {
   settingsViewer.style.display = 'none';
   planViewer.style.display = 'flex';
 
-  planPanel.open(plan.title, currentPlanFilePath, currentPlanContent);
+  planPanel.open(plan.title, currentPlanFilePath, currentPlanContent, opts);
 }
 
 function hideAllViewers() {
@@ -220,7 +224,9 @@ function buildMemoryItem(file) {
 
   const metaEl = document.createElement('div');
   metaEl.className = 'session-meta';
-  metaEl.textContent = formatDate(new Date(file.modified));
+  const dateEl = document.createElement('span');
+  dateEl.textContent = formatDate(new Date(file.modified));
+  metaEl.append(dateEl, searchHitBadge(file.filePath));
 
   info.appendChild(titleEl);
   info.appendChild(pathEl);
@@ -260,11 +266,11 @@ function buildMemoryItem(file) {
 
   item.appendChild(row);
 
-  item.addEventListener('click', () => openMemory(file));
+  item.addEventListener('click', () => openMemory(file, searchJumpOpts(file.filePath)));
   return item;
 }
 
-async function openMemory(file) {
+async function openMemory(file, opts = {}) {
   // Mark active in sidebar
   memoryContent.querySelectorAll('.memory-item.active').forEach(el => el.classList.remove('active'));
   const target = memoryContent.querySelector(`.memory-item[data-filepath="${CSS.escape(file.filePath)}"]`);
@@ -282,5 +288,5 @@ async function openMemory(file) {
   settingsViewer.style.display = 'none';
   memoryViewer.style.display = 'flex';
 
-  memoryPanel.open(file.displayName || file.filename, file.filePath, content);
+  memoryPanel.open(file.displayName || file.filename, file.filePath, content, opts);
 }

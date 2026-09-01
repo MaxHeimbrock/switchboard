@@ -1,10 +1,11 @@
 // --- Sidebar rendering ---
 // Depends on globals: sidebarContent, openSessions, activeSessionId, activePtyIds,
 // lockedSessions, pendingSessions, sessionMap, sortedOrder, searchMatchIds,
-// searchMatchProjectPaths, showStarredOnly, showRunningOnly, showTodayOnly,
+// searchMatchProjectPaths, searchHitCounts, searchQueryText, showStarredOnly,
+// showRunningOnly, showTodayOnly,
 // visibleSessionCount, sessionMaxAgeDays, attentionSessions, responseReadySessions,
 // sessionBusyState, cachedProjects, cachedAllProjects, gridCards, gridViewActive (app.js)
-// Depends on: cleanDisplayName, formatDate, escapeHtml, lockedTitle (utils.js), ICONS (icons.js),
+// Depends on: cleanDisplayName, formatDate, escapeHtml, lockedTitle, searchHitBadge (utils.js), ICONS (icons.js),
 // showSession (terminal-manager.js), confirmAndStopSession, pollActiveSessions,
 // showNewSessionPopover, openSettingsViewer, showResumeSessionDialog,
 // showJsonlViewer, openSession, loadProjects, markUnread,
@@ -560,6 +561,14 @@ function rebindSidebarEvents(projects) {
     // not-running rows share the transcript branch, so no click can raise the
     // "already open in another shell" dialog — only the resume button can.
     item.onclick = () => {
+      // A search hit beats both branches below, including a session running here: the
+      // point of the click is the query, and the transcript is the only view that can
+      // show where it occurs. One guard covers all three agreed cases, because
+      // searchHitCounts is empty in every other one.
+      if (searchHitCounts.get(session.sessionId) > 0) {
+        showJsonlViewer(session, { findQuery: searchQueryText });
+        return;
+      }
       if (session.type === 'terminal' || isRunningHere(session.sessionId)) openSession(session);
       else showJsonlViewer(session);
     };
@@ -709,7 +718,10 @@ function buildSessionItem(session) {
   shortIdEl.className = 'session-short-id';
   shortIdEl.title = session.sessionId;
   shortIdEl.textContent = session.sessionId.split('-')[0];
-  metaEl.append(timeEl, shortIdEl);
+  // Occurrence count for the active full-text query. Built here rather than injected
+  // after render because renderProjects morphs from a fresh tree, so anything added
+  // from outside the build is dropped by the next refresh.
+  metaEl.append(timeEl, searchHitBadge(session.sessionId), shortIdEl);
 
   if (session.type === 'terminal') {
     const badge = document.createElement('span');

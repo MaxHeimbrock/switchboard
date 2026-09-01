@@ -41,6 +41,9 @@ const { startScheduler } = require('./schedule-runner');
 const { encodeProjectPath } = require('./encode-project-path');
 const { skillDisplayName } = require('./skill-name');
 const { readSessionTail } = require('./read-session-tail');
+// The renderer's own definition of "conversation text", reused here so a badge counted
+// in main and a find bar run in the renderer can never disagree about the same file.
+const { conversationText, countOccurrences } = require('./public/jsonl-viewer');
 
 
 // --- Auto-updater (only in packaged builds) ---
@@ -891,6 +894,72 @@ ipcMain.handle('save-memory', (_event, filePath, content) => {
 // --- IPC: search ---
 ipcMain.handle('search', (_event, type, query, titleOnly) => {
   return searchByType(type, query, 50, !!titleOnly);
+});
+
+// --- IPC: count-occurrences ---
+// Exact occurrence counts for the sidebar's search badges. It runs here rather than in
+// the renderer because plan and memory content is not in the renderer at all, and fifty
+// whole transcripts over the bridge cost far more than fifty integers coming back.
+//
+// Transcript text is cached on (mtime, size): a search is a burst of keystrokes over the
+// same set of sessions, and re-parsing every .jsonl for each one is the whole cost.
+const transcriptTextCache = new Map(); // sessionId -> { mtimeMs, size, text }
+const TRANSCRIPT_TEXT_CACHE_MAX = 100;
+// Bumped on entry, so a call the user has already typed past can stop reading files for
+// a result the renderer is going to discard anyway.
+let countRequestId = 0;
+
+function sessionConversationText(sessionId) {
+  const folder = getCachedFolder(sessionId);
+  if (!folder) return null;
+  const jsonlPath = path.join(PROJECTS_DIR, folder, sessionId + '.jsonl');
+  const stat = fs.statSync(jsonlPath);
+  const hit = transcriptTextCache.get(sessionId);
+  if (hit && hit.mtimeMs === stat.mtimeMs && hit.size === stat.size) return hit.text;
+  // A null cursor is a whole-file read: the incremental reader already does the parse.
+  const { entries } = readSessionTail(jsonlPath, null);
+  const text = conversationText(entries);
+  transcriptTextCache.set(sessionId, { mtimeMs: stat.mtimeMs, size: stat.size, text });
+  if (transcriptTextCache.size > TRANSCRIPT_TEXT_CACHE_MAX) {
+    // FIFO — a Map iterates in insertion order, so the first key is the oldest.
+    transcriptTextCache.delete(transcriptTextCache.keys().next().value);
+  }
+  return text;
+}
+
+ipcMain.handle('count-occurrences', async (_event, type, ids, query) => {
+  const counts = {};
+  if (!query || !Array.isArray(ids) || !ids.length) return counts;
+  const myId = ++countRequestId;
+
+  let read = 0;
+  for (const id of ids) {
+    if (myId !== countRequestId) return counts;
+    // Yield every few files so the PTYs keep being served while a long list is read.
+    if (read && read % 5 === 0) await new Promise(setImmediate);
+    read++;
+    try {
+      let text = null;
+      if (type === 'session') {
+        text = sessionConversationText(id);
+      } else if (type === 'plan') {
+        text = fs.readFileSync(path.join(PLANS_DIR, path.basename(id)), 'utf8');
+      } else if (type === 'memory') {
+        // The same guard read-memory applies.
+        const resolved = path.resolve(id);
+        if (!resolved.endsWith('.md')) continue;
+        if (!resolved.startsWith(CLAUDE_DIR) && !fs.existsSync(resolved)) continue;
+        text = fs.readFileSync(resolved, 'utf8');
+      } else {
+        continue;
+      }
+      if (text == null) continue;
+      counts[id] = countOccurrences(text, query);
+    } catch {
+      // Unreadable: the id is simply omitted, and its card goes without a badge.
+    }
+  }
+  return counts;
 });
 
 // --- IPC: settings ---

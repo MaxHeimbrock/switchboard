@@ -413,7 +413,10 @@ async function showResumeSessionDialog(session) {
 // Shown instead of opening a session another `claude` process is holding. A hard block:
 // resuming anyway would put two processes on one transcript, so there is no override,
 // and `busy` and `idle` holders are treated identically.
-function showSessionLockedDialog(session, holder) {
+// `opts.unreachable` is the case where the holder *was* found but could not be raised — it
+// quit between the guard and the reveal, or `open` errored. Same dialog, one extra line, so
+// the user is not left wondering why nothing came forward.
+function showSessionLockedDialog(session, holder, opts = {}) {
   const overlay = document.createElement('div');
   overlay.className = 'new-session-overlay';
 
@@ -428,6 +431,7 @@ function showSessionLockedDialog(session, holder) {
       <div class="session-locked-name">${escapeHtml(cleanDisplayName(sessionName) || sessionName)}</div>
       <div class="session-locked-holder">${escapeHtml(holder.label)}</div>
       <div class="session-locked-hint">Two Claude processes on one session would both append to its transcript. Quit it there first.</div>
+      ${opts.unreachable ? `<div class="session-locked-unreachable">Couldn't reach it — pid ${holder.pid} may have exited.</div>` : ''}
     </div>
     <div class="new-session-actions">
       <button class="new-session-cancel-btn">OK</button>

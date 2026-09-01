@@ -704,6 +704,11 @@ async function showJsonlViewer(session, opts = {}) {
   // After the first render, so the bar counts the whole transcript rather than whatever
   // that pass happened to have appended by the time it opened.
   if (opts.findQuery) openJsonlFind(opts.findQuery);
+  // The poll would get to this within a tick, but the button is on screen now and would
+  // read "Resume session" until then.
+  setResumeAffordance(jsonlViewerResumeBtn, lockedSessions.has(session.sessionId)
+    && !activePtyIds.has(session.sessionId));
+
   // Watched after the first render, so a change during it is caught by the pass
   // itself rather than arriving before there is anything to reconcile against.
   await window.api.watchSessionTranscript(session.sessionId);

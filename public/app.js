@@ -456,16 +456,17 @@ addProjectBtn.addEventListener('click', () => {
 });
 
 // --- Read-only transcript view header buttons ---
-// Resume goes through openSession, the same entry point the row's resume button uses,
-// so the lock guard fires and the block dialog appears over a transcript that stays
-// open and readable.
+// Resume goes through openSession, the same entry point the row's resume button uses, so
+// the lock guard fires here too: an externally-held session raises that window (or, failing
+// that, shows the block dialog) over a transcript that stays open and readable.
+jsonlViewerResumeBtn.innerHTML = ICONS.resume(12);
 jsonlViewerResumeBtn.addEventListener('click', async () => {
   const session = jsonlTail.session;
   if (!session) return;
   await openSession(session);
-  // A refused resume leaves the transcript up on purpose — the block dialog appears
-  // over it. A successful one has to take it down, and showSession only does that on
-  // its single-terminal path, not in grid view.
+  // A refused resume leaves the transcript up on purpose — the raised window, or the block
+  // dialog, appears over it. A successful one has to take it down, and showSession only does
+  // that on its single-terminal path, not in grid view.
   if (jsonlViewer.style.display !== 'none' && isRunningHere(session.sessionId)) closeJsonlViewer();
 });
 jsonlViewerCloseBtn.addEventListener('click', closeJsonlViewer);
@@ -650,6 +651,24 @@ async function pollActiveSessions() {
   scheduleActiveSessionsPoll();
 }
 
+// A resume button for a session held by another `claude` does something different from
+// every other row's: it goes to that window instead of resuming here. Say so, rather than
+// leaving a play triangle that promises a resume the click will refuse.
+//
+// Driven from the poll rather than from where the button is built, because the lock state
+// is what changes underneath a row that already exists.
+function setResumeAffordance(btn, locked) {
+  if (!btn) return;
+  btn.classList.toggle('focus-external', locked);
+  btn.title = locked ? 'Focus external session' : 'Resume session';
+  // Only the transcript view's button carries one; the sidebar's has no label to keep in step.
+  if (btn.hasAttribute('aria-label')) btn.setAttribute('aria-label', btn.title);
+  // Compare before writing: this runs every poll, and replacing the markup unconditionally
+  // would drop hover and focus on the button several times a minute.
+  const want = locked ? ICONS.focusExternal(14) : ICONS.resume(12);
+  if (btn.innerHTML !== want) btn.innerHTML = want;
+}
+
 function updateRunningIndicators() {
   document.querySelectorAll('.session-item').forEach(item => {
     const id = item.dataset.sessionId;
@@ -669,6 +688,7 @@ function updateRunningIndicators() {
     item.classList.toggle('locked-elsewhere', !!holder);
     if (holder) item.title = lockedTitle(holder);
     else if (item.title) item.removeAttribute('title');
+    setResumeAffordance(item.querySelector('.session-resume-btn'), !!holder);
     const dot = item.querySelector('.session-status-dot');
     if (dot) dot.classList.toggle('running', running);
   });
@@ -678,6 +698,12 @@ function updateRunningIndicators() {
     const dot = group.querySelector('.slug-group-dot');
     if (dot) dot.classList.toggle('running', hasRunning);
   });
+  // The transcript view's own resume button, which has no row to hang off.
+  const tailed = jsonlViewer.style.display !== 'none' && jsonlTail.session;
+  setResumeAffordance(jsonlViewerResumeBtn, !!tailed
+    && lockedSessions.has(tailed.sessionId)
+    && !activePtyIds.has(tailed.sessionId));
+
   // Update grid card dots and status text
   for (const [sid, card] of gridCards) {
     const running = activePtyIds.has(sid);
@@ -926,7 +952,20 @@ async function openSession(session, customOptions) {
     if (holder) {
       lockedSessions.set(sessionId, holder);
       updateRunningIndicators();
-      showSessionLockedDialog(session, holder);
+      // Take the user to the window that has it, which is what they actually wanted, and
+      // fall back to the block dialog only when there is nowhere to go: a headless holder
+      // with no app above it (`no-app`), a platform where none of this exists
+      // (`unsupported`), or an app that would not come forward (`unreachable`).
+      const reveal = await window.api.revealSessionHolder(sessionId);
+      if (reveal.ok) {
+        // Leave a transcript that is already up exactly as it is — showJsonlViewer blanks
+        // the body and restarts the tail, which would throw away the reader's position.
+        const showing = jsonlViewer.style.display !== 'none'
+          && jsonlTail.session?.sessionId === sessionId;
+        if (!showing) showJsonlViewer(session);
+      } else {
+        showSessionLockedDialog(session, holder, { unreachable: reveal.reason === 'unreachable' });
+      }
       return;
     }
     lockedSessions.delete(sessionId);

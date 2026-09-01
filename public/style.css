@@ -996,6 +996,19 @@ body { display: flex; flex-direction: column; }
   background: rgba(62,207,90,0.1);
 }
 
+/* Held by another `claude`: the click goes to that window instead of resuming here, so the
+   button takes the same violet as the locked status dot rather than the resume green. */
+.session-resume-btn.focus-external,
+#jsonl-viewer-resume-btn.focus-external {
+  color: #a78bfa;
+}
+
+.session-resume-btn.focus-external:hover,
+#jsonl-viewer-resume-btn.focus-external:hover {
+  color: #c4b5fd;
+  background: rgba(167,139,250,0.12);
+}
+
 .session-unread-btn:hover {
   color: #4fc3f7;
   background: rgba(79,195,247,0.1);
@@ -3491,6 +3504,15 @@ body { display: flex; flex-direction: column; }
   font-size: 12px;
   color: #8888a0;
   line-height: 1.5;
+}
+
+/* Only when the holder was found but could not be raised. Warmer than the hint above it so
+   it reads as what went wrong rather than as more advice. */
+.session-locked-unreachable {
+  font-size: 12px;
+  color: #c8a06a;
+  line-height: 1.5;
+  margin-top: 8px;
 }
 
 .new-session-dialog .settings-field {

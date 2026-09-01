@@ -9,6 +9,7 @@ const log = require('electron-log');
 const { startMcpServer, shutdownMcpServer, shutdownAll: shutdownAllMcp, resolvePendingDiff, rekeyMcpServer, cleanStaleLockFiles } = require('./mcp-bridge');
 const { fetchAndTransformUsage } = require('./claude-auth');
 const { getExternalSessions, holderLabel, LOCKED_TITLE } = require('./claude-sessions');
+const { revealHolder } = require('./reveal-holder');
 
 // SWITCHBOARD_DATA_DIR isolates a dev/test instance from the installed app:
 // db.js puts switchboard.db under it, and pointing userData there gives the
@@ -1029,7 +1030,12 @@ ipcMain.handle('get-active-sessions', () => {
 // these would put two processes on the same transcript, so both the sidebar marking
 // and the click-time guard read this. Kept separate from get-active-sessions so that
 // handler's string[] shape — consumed directly by pollActiveSessions — is untouched.
-async function collectSessionLocks() {
+
+// The raw scan, holders and all. Split from the mapper below because reveal-session-holder
+// needs the two fields the IPC payload drops — `ppid`, to walk up to the owning app, and
+// `cwd`, to pick the right editor window — and shipping those to the renderer would put
+// process details somewhere with no use for them.
+async function scanSessionLocks() {
   const ownSessionIds = new Set();
   const ownPtyPids = new Set();
   for (const [sessionId, session] of activeSessions) {
@@ -1038,7 +1044,11 @@ async function collectSessionLocks() {
     if (session.realSessionId) ownSessionIds.add(session.realSessionId);
     if (session.pty?.pid) ownPtyPids.add(session.pty.pid);
   }
-  const locks = await getExternalSessions({ ownSessionIds, ownPtyPids, log });
+  return await getExternalSessions({ ownSessionIds, ownPtyPids, log });
+}
+
+async function collectSessionLocks() {
+  const locks = await scanSessionLocks();
   const out = {};
   for (const [sessionId, holder] of locks) {
     out[sessionId] = {
@@ -1058,6 +1068,22 @@ ipcMain.handle('get-session-locks', async () => {
   } catch (err) {
     log.warn('[locks] get-session-locks failed:', err.message);
     return {};
+  }
+});
+
+// --- IPC: reveal-session-holder ---
+// Go to the window holding this session instead of refusing the resume with a dialog. The
+// scan is deliberately fresh rather than passed in from the renderer: the holder must still
+// exist *now*, and only main ever sees its ppid. A holder that has gone in the meantime is
+// `unreachable` — the caller wanted to be taken somewhere and there is nowhere to go.
+ipcMain.handle('reveal-session-holder', async (_e, sessionId) => {
+  try {
+    const holder = (await scanSessionLocks()).get(sessionId);
+    if (!holder) return { ok: false, reason: 'unreachable' };
+    return await revealHolder(holder, { log });
+  } catch (err) {
+    log.warn('[reveal] reveal-session-holder failed:', err.message);
+    return { ok: false, reason: 'unreachable' };
   }
 });
 

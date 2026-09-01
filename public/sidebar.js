@@ -757,7 +757,7 @@ function buildSessionItem(session) {
   const resumeBtn = document.createElement('button');
   resumeBtn.className = 'session-resume-btn';
   resumeBtn.title = 'Resume session';
-  resumeBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><path d="M3.5 2.2v7.6a.5.5 0 0 0 .77.42l6-3.8a.5.5 0 0 0 0-.84l-6-3.8a.5.5 0 0 0-.77.42z"/></svg>';
+  resumeBtn.innerHTML = ICONS.resume(12);
 
   const launchConfigBtn = document.createElement('button');
   launchConfigBtn.className = 'session-launch-config-btn';

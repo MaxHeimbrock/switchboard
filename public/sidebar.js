@@ -9,7 +9,7 @@
 // showSession (terminal-manager.js), confirmAndStopSession, pollActiveSessions,
 // showNewSessionPopover, openSettingsViewer, showResumeSessionDialog,
 // showJsonlViewer, openSession, loadProjects, markUnread,
-// clearUnread, refreshSidebar (app.js/dialogs.js)
+// clearUnread, refreshSidebar, setResumeAffordance (app.js/dialogs.js)
 
 function slugId(slug) {
   return 'slug-' + slug.replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -756,8 +756,11 @@ function buildSessionItem(session) {
   // shows the terminal.
   const resumeBtn = document.createElement('button');
   resumeBtn.className = 'session-resume-btn';
-  resumeBtn.title = 'Resume session';
-  resumeBtn.innerHTML = ICONS.resume(12);
+  // Set from the lock state here as well as on the poll, for the same reason the row's
+  // own locked-elsewhere class is: renderProjects builds a fresh tree, and nothing
+  // re-runs updateRunningIndicators after a render, so a held session would show the
+  // play triangle until the next poll tick — up to POLL_IDLE_MS later.
+  setResumeAffordance(resumeBtn, !!lockHolder);
 
   const launchConfigBtn = document.createElement('button');
   launchConfigBtn.className = 'session-launch-config-btn';

@@ -655,8 +655,9 @@ async function pollActiveSessions() {
 // every other row's: it goes to that window instead of resuming here. Say so, rather than
 // leaving a play triangle that promises a resume the click will refuse.
 //
-// Driven from the poll rather than from where the button is built, because the lock state
-// is what changes underneath a row that already exists.
+// Called from the poll, because the lock state changes underneath a row that already
+// exists — and from buildSessionItem, because a render builds a fresh button that would
+// otherwise carry the play triangle until the next tick.
 function setResumeAffordance(btn, locked) {
   if (!btn) return;
   btn.classList.toggle('focus-external', locked);

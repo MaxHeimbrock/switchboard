@@ -430,6 +430,9 @@ runningToggle.addEventListener('click', () => {
   if (showRunningOnly) { showStarredOnly = false; starToggle.classList.remove('active'); }
   runningToggle.classList.toggle('active', showRunningOnly);
   refreshSidebar({ resort: true });
+  // The filter now matches on lock data that can be a whole idle tick old, so read it
+  // fresh rather than filtering on what the last poll happened to see.
+  pollActiveSessions();
 });
 
 // --- Today filter toggle ---
@@ -623,29 +626,42 @@ terminalStopBtn.addEventListener('click', () => {
 
 
 // --- Poll for active PTY sessions ---
-// Adaptive cadence: poll fast (3s) only while PTYs are running; when idle, back
-// off to 30s. Every renderer path that starts a session (launchNewSession,
-// openSession, launchTerminalSession, onSessionDetected/Forked) calls
+// Adaptive cadence: poll fast (3s) whenever anything is live anywhere — a PTY of ours
+// or a `claude` process in another shell — and back off to 30s only when nothing is.
+// External liveness earns the fast cadence because the sidebar now filters and sorts on
+// it: a row that lingered 30s after its terminal exited would be a good deal more
+// jarring than a stale marker. Every renderer path that starts a session
+// (launchNewSession, openSession, launchTerminalSession, onSessionDetected/Forked) calls
 // pollActiveSessions() explicitly, which re-arms the fast cadence immediately.
-// The 30s idle floor still catches sessions started outside the renderer
-// (scheduler-spawned PTYs, other windows) within at most 30s.
+// The 30s idle floor now only bounds *first* detection of a session started outside
+// this renderer (a scheduler-spawned PTY, another window, a plain terminal).
 const POLL_FAST_MS = 3000;
 const POLL_IDLE_MS = 30000;
 let pollTimer = null;
 
 function scheduleActiveSessionsPoll() {
   if (pollTimer) clearTimeout(pollTimer);
-  const delay = activePtyIds.size > 0 ? POLL_FAST_MS : POLL_IDLE_MS;
+  const delay = (activePtyIds.size > 0 || lockedSessions.size > 0) ? POLL_FAST_MS : POLL_IDLE_MS;
   pollTimer = setTimeout(pollActiveSessions, delay);
 }
 
 async function pollActiveSessions() {
   try {
+    const prevLive = liveSessionIds();
     const ids = await window.api.getActiveSessions();
     activePtyIds = new Set(ids);
     lockedSessions = new Map(Object.entries(await window.api.getSessionLocks()));
     updateRunningIndicators();
     updateTerminalHeader();
+    // The list itself depends on the live set now — the running filter, the sort tier,
+    // the truncation exemption — and nothing fires when a session outside Switchboard
+    // starts or exits. Gated on a real change: a quiet tick must not re-render the
+    // sidebar every 3s. No resort, so a row that just became live elsewhere is kept in
+    // the list rather than jumping to its tier mid-tick.
+    if (!sameIds(prevLive, liveSessionIds())) {
+      refreshSidebar();
+      renderDefaultStatus();
+    }
   } catch {}
   scheduleActiveSessionsPoll();
 }
@@ -898,6 +914,35 @@ function isRunningHere(sessionId) {
   if (activePtyIds.has(sessionId)) return true;
   const entry = openSessions.get(sessionId);
   return !!entry && !entry.closed;
+}
+
+// "Running" in the sidebar means running *anywhere*: a PTY of ours, or a `claude` process
+// in a plain terminal or another window (`lockedSessions`, from the poll's lock scan). The
+// two sets are disjoint at source — collectSessionLocks (main.js) excludes our own session
+// ids and pty pids — so the union needs no dedup; a Set is only robust to that changing.
+function liveSessionIds() {
+  return new Set([...activePtyIds, ...lockedSessions.keys()]);
+}
+
+function isLiveAnywhere(sessionId) {
+  return activePtyIds.has(sessionId) || lockedSessions.has(sessionId);
+}
+
+// Rank for sorting and for what stays visible: 2 = live in a PTY of ours, 1 = live
+// elsewhere, 0 = stopped. `pendingSessions` counts as ours, exactly as the sort already
+// read it — but it stays out of isLiveAnywhere: a pending entry is cleared when the
+// transcript file appears, not when the process exits, so a launch that never wrote a
+// .jsonl must not be able to hold a row in the filtered list.
+function liveTier(sessionId) {
+  if (activePtyIds.has(sessionId) || pendingSessions.has(sessionId)) return 2;
+  if (lockedSessions.has(sessionId)) return 1;
+  return 0;
+}
+
+function sameIds(a, b) {
+  if (a.size !== b.size) return false;
+  for (const id of a) if (!b.has(id)) return false;
+  return true;
 }
 
 async function openSession(session, customOptions) {
@@ -1217,7 +1262,7 @@ let activityTimer = null;
 function renderDefaultStatus() {
   const totalSessions = cachedAllProjects.reduce((n, p) => n + p.sessions.length, 0);
   const totalProjects = cachedAllProjects.length;
-  const running = activePtyIds.size;
+  const running = liveSessionIds().size;
   const parts = [];
   if (running > 0) parts.push(`${running} running`);
   parts.push(`${totalSessions} sessions`);

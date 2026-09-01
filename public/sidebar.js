@@ -1,11 +1,12 @@
 // --- Sidebar rendering ---
 // Depends on globals: sidebarContent, openSessions, activeSessionId, activePtyIds,
-// lockedSessions, pendingSessions, sessionMap, sortedOrder, searchMatchIds,
+// lockedSessions, sessionMap, sortedOrder, searchMatchIds,
 // searchMatchProjectPaths, searchHitCounts, searchQueryText, showStarredOnly,
 // showRunningOnly, showTodayOnly,
 // visibleSessionCount, sessionMaxAgeDays, attentionSessions, responseReadySessions,
 // sessionBusyState, cachedProjects, cachedAllProjects, gridCards, gridViewActive (app.js)
 // Depends on: cleanDisplayName, formatDate, escapeHtml, lockedTitle, searchHitBadge (utils.js), ICONS (icons.js),
+// isLiveAnywhere, liveTier (app.js — "running" means running anywhere; see there),
 // showSession (terminal-manager.js), confirmAndStopSession, pollActiveSessions,
 // showNewSessionPopover, openSettingsViewer, showResumeSessionDialog,
 // showJsonlViewer, openSession, loadProjects, markUnread,
@@ -70,10 +71,12 @@ function buildSlugGroup(slug, sessions) {
   const sessionsContainer = document.createElement('div');
   sessionsContainer.className = 'slug-group-sessions';
 
+  // Live anywhere promotes, ours or not. `sessions` arrives in the caller's tier order,
+  // so own-live still precedes externally-live inside `promoted`.
   const promoted = [];
   const rest = [];
   for (const session of sessions) {
-    if (activePtyIds.has(session.sessionId)) {
+    if (liveTier(session.sessionId) > 0) {
       promoted.push(session);
     } else {
       rest.push(session);
@@ -150,7 +153,7 @@ function renderProjects(projects, resort) {
   function processProjectSessions(project, resort) {
     let filtered = project.sessions;
     if (showStarredOnly) filtered = filtered.filter(s => s.starred);
-    if (showRunningOnly) filtered = filtered.filter(s => activePtyIds.has(s.sessionId));
+    if (showRunningOnly) filtered = filtered.filter(s => isLiveAnywhere(s.sessionId));
     if (showTodayOnly) {
       const now = new Date();
       const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
@@ -164,11 +167,12 @@ function renderProjects(projects, resort) {
     if (filtered.length === 0 && !project._projectMatchedOnly && (project.sessions.length > 0 || anyFilterActive)) return null;
 
     // Sort
+    // Six tiers, highest first: starred+ours, ours, starred+elsewhere, elsewhere,
+    // starred, the rest. Starring is a booster within a tier, so your own live work
+    // never drops below a session live in someone else's shell.
     filtered = [...filtered].sort((a, b) => {
-      const aRunning = activePtyIds.has(a.sessionId) || pendingSessions.has(a.sessionId);
-      const bRunning = activePtyIds.has(b.sessionId) || pendingSessions.has(b.sessionId);
-      const aPri = (a.starred && aRunning ? 3 : aRunning ? 2 : a.starred ? 1 : 0);
-      const bPri = (b.starred && bRunning ? 3 : bRunning ? 2 : b.starred ? 1 : 0);
+      const aPri = liveTier(a.sessionId) * 2 + (a.starred ? 1 : 0);
+      const bPri = liveTier(b.sessionId) * 2 + (b.starred ? 1 : 0);
       if (aPri !== bPri) return bPri - aPri;
       return new Date(b.modified) - new Date(a.modified);
     });
@@ -186,23 +190,22 @@ function renderProjects(projects, resort) {
     }
     const allItems = [];
     for (const session of ungrouped) {
-      const isRunning = activePtyIds.has(session.sessionId) || pendingSessions.has(session.sessionId);
-      allItems.push({ sortTime: new Date(session.modified).getTime(), pinned: !!session.starred, running: isRunning, element: buildSessionItem(session) });
+      allItems.push({ sortTime: new Date(session.modified).getTime(), pinned: !!session.starred, live: liveTier(session.sessionId), element: buildSessionItem(session) });
     }
     for (const [slug, sessions] of slugMap) {
       const mostRecentTime = Math.max(...sessions.map(s => new Date(s.modified).getTime()));
-      const hasRunning = sessions.some(s => activePtyIds.has(s.sessionId) || pendingSessions.has(s.sessionId));
+      const live = Math.max(...sessions.map(s => liveTier(s.sessionId)));
       const hasPinned = sessions.some(s => s.starred);
       const element = sessions.length === 1 ? buildSessionItem(sessions[0]) : buildSlugGroup(slug, sessions);
-      allItems.push({ sortTime: mostRecentTime, pinned: hasPinned, running: hasRunning, element });
+      allItems.push({ sortTime: mostRecentTime, pinned: hasPinned, live, element });
     }
 
     // Sort render items
     const prevEntry = sortedOrder.find(e => e.projectPath === project.projectPath);
     if (resort || !prevEntry) {
       allItems.sort((a, b) => {
-        const aPri = (a.pinned && a.running ? 3 : a.running ? 2 : a.pinned ? 1 : 0);
-        const bPri = (b.pinned && b.running ? 3 : b.running ? 2 : b.pinned ? 1 : 0);
+        const aPri = a.live * 2 + (a.pinned ? 1 : 0);
+        const bPri = b.live * 2 + (b.pinned ? 1 : 0);
         if (aPri !== bPri) return bPri - aPri;
         return b.sortTime - a.sortTime;
       });
@@ -227,7 +230,7 @@ function renderProjects(projects, resort) {
       let count = 0;
       const ageCutoff = Date.now() - sessionMaxAgeDays * 86400000;
       for (const item of allItems) {
-        if (item.running || item.pinned || (count < visibleSessionCount && item.sortTime >= ageCutoff)) {
+        if (item.live > 0 || item.pinned || (count < visibleSessionCount && item.sortTime >= ageCutoff)) {
           visible.push(item);
           count++;
         } else {

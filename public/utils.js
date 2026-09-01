@@ -89,3 +89,17 @@ const LOCKED_ELSEWHERE_TITLE = 'Already open in another shell';
 function lockedTitle(holder) {
   return LOCKED_ELSEWHERE_TITLE + ' — ' + holder.label;
 }
+
+// The occurrence-count badge a card carries while a full-text search is active, or an
+// empty fragment when it has no count — so every caller can append it unconditionally.
+// `searchHitCounts` (app.js) holds only counts > 0, which is what makes "no badge" and
+// "no jump on click" the same condition.
+function searchHitBadge(id) {
+  const count = searchHitCounts.get(id);
+  if (!count) return document.createDocumentFragment();
+  const el = document.createElement('span');
+  el.className = 'search-hit-count';
+  el.title = count + (count === 1 ? ' occurrence' : ' occurrences') + ' of "' + searchQueryText + '"';
+  el.textContent = count;
+  return el;
+}

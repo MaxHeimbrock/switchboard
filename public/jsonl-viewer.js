@@ -2,6 +2,10 @@
 // Depends on globals: escapeHtml (utils.js), hideAllViewers (plans-memory-view.js),
 // placeholder, terminalArea, jsonlViewer, jsonlViewerTitle, jsonlViewerSessionId,
 // jsonlViewerBody, restoreMainArea (app.js)
+//
+// Also the home of conversationText() — the single definition of what a keyword search
+// counts and what the transcript's find bar searches. It is required by main.js for the
+// sidebar's occurrence badges, so nothing above the function bodies may touch the DOM.
 
 function renderJsonlText(text) {
   if (window.marked) {
@@ -604,6 +608,56 @@ function renderJsonlEntry(entry, toolResultMap) {
   return div;
 }
 
+// The text the transcript view renders as conversation, as one string. This is the
+// single definition of "what a keyword search counts", and it deliberately mirrors the
+// `.jsonl-text` branch of renderJsonlEntry above — kept beside it so the two stay in
+// step. Anything that branch renders as something else (Thinking, tool calls, tool
+// results, inline images, meta entries) is not conversation and is not counted, so no
+// hit ever lands inside a collapsed block the reader would have to expand to see.
+function conversationText(entries) {
+  const parts = [];
+  for (const el of mergeLocalCommandEntries(entries)) {
+    const entry = el.entry;
+    // A local command renders as a Bash tool block, not as a message.
+    if (entry._localCmd) continue;
+
+    const isUser = entry.type === 'user' || (entry.type === 'message' && entry.role === 'user');
+    const isAssistant = entry.type === 'assistant' || (entry.type === 'message' && entry.role === 'assistant');
+    if (!isUser && !isAssistant) continue;
+
+    let contentBlocks = entry.message?.content || entry.content;
+    if (!contentBlocks) continue;
+    if (typeof contentBlocks === 'string') contentBlocks = [{ type: 'text', text: contentBlocks }];
+    if (!Array.isArray(contentBlocks)) continue;
+
+    for (const block of mergeLocalCommandBlocks(contentBlocks)) {
+      if (block.type !== 'text' || !block.text || !block.text.trim()) continue;
+      if (block._localCmd) continue;
+      const text = block.text.trim();
+      // Rendered as an <img>, so there is no text on screen to find.
+      if (/^\[Image:\s*source:\s*([^\]]+)\]$/.test(text)) continue;
+      parts.push(text);
+    }
+  }
+  return parts.join('\n');
+}
+
+// Case-insensitive, non-overlapping substring count — the same walk createCMSearchBar's
+// findAll does, so a badge and a find bar can never disagree about how many hits a
+// piece of text holds.
+function countOccurrences(haystack, query) {
+  if (!haystack || !query) return 0;
+  const hay = haystack.toLowerCase();
+  const term = query.toLowerCase();
+  let pos = 0;
+  let count = 0;
+  while ((pos = hay.indexOf(term, pos)) !== -1) {
+    count++;
+    pos += term.length;
+  }
+  return count;
+}
+
 // --- Live-tailing read-only transcript view ---
 //
 // The view is read-only in the strong sense: it spawns no PTY and offers no input
@@ -620,7 +674,7 @@ const jsonlTail = { gen: 0, session: null, cursor: null, raw: [], nodes: [], saf
 let jsonlTailBusy = false;
 let jsonlTailPending = false;
 
-async function showJsonlViewer(session) {
+async function showJsonlViewer(session, opts = {}) {
   hideAllViewers();
   placeholder.style.display = 'none';
   terminalArea.style.display = 'none';
@@ -630,6 +684,11 @@ async function showJsonlViewer(session) {
   jsonlViewerTitle.textContent = displayName;
   jsonlViewerSessionId.textContent = session.sessionId;
   jsonlViewerBody.innerHTML = '';
+
+  // Built here rather than on the first jump, so Cmd+F answers in a transcript that was
+  // opened without a search. Focusing the body is what puts the keydown in reach.
+  jsonlFindBar();
+  jsonlViewerBody.focus({ preventScroll: true });
 
   const gen = ++jsonlTail.gen;
   jsonlTail.session = session;
@@ -642,6 +701,9 @@ async function showJsonlViewer(session) {
   // Another session was opened while the first render was in flight — its own call
   // owns the watcher now, and installing ours would point it at the wrong file.
   if (gen !== jsonlTail.gen) return;
+  // After the first render, so the bar counts the whole transcript rather than whatever
+  // that pass happened to have appended by the time it opened.
+  if (opts.findQuery) openJsonlFind(opts.findQuery);
   // Watched after the first render, so a change during it is caught by the pass
   // itself rather than arriving before there is anything to reconcile against.
   await window.api.watchSessionTranscript(session.sessionId);
@@ -649,6 +711,9 @@ async function showJsonlViewer(session) {
 
 function stopJsonlTail() {
   const tailing = jsonlTail.session;
+  // The bar belongs to the transcript being left, not to the next one: its query and
+  // its marks go with it. Clearing the sidebar search does not come through here.
+  jsonlViewer._jsonlFindBar?.close();
   jsonlTail.gen++;
   jsonlTail.session = null;
   jsonlTail.cursor = null;
@@ -664,6 +729,178 @@ function stopJsonlTail() {
 function closeJsonlViewer() {
   stopJsonlTail();
   restoreMainArea();
+}
+
+// --- Find bar for the transcript ---
+//
+// The transcript is DOM, not a CodeMirror document, so it gets its own bar rather than
+// reusing createCMSearchBar — but the same markup, the same keys and the same counting
+// rule, so the two behave alike. Its scope is deliberately narrow: text nodes inside
+// `.jsonl-text` and nothing else, which is exactly what conversationText() counts, so
+// the `N` here always equals the badge on the card that was clicked.
+//
+// The consequence to know about: Cmd+F in a transcript finds nothing inside tool output
+// or a Thinking block. That is the agreed scope, not an oversight.
+function createJsonlFindBar() {
+  const bar = document.createElement('div');
+  bar.className = 'terminal-search-bar';
+  bar.style.display = 'none';
+  bar.innerHTML = `
+    <input type="text" class="terminal-search-input" placeholder="Find..." />
+    <span class="terminal-search-count"></span>
+    <button class="terminal-search-prev" title="Previous (Shift+Enter)">&#x25B2;</button>
+    <button class="terminal-search-next" title="Next (Enter)">&#x25BC;</button>
+    <button class="terminal-search-close" title="Close (Escape)">&times;</button>
+  `;
+  // Hung off the header rather than the viewer: the viewer's own top-right corner is
+  // where the resume and close buttons live, and the bar would sit on top of them.
+  // Absolutely positioned, so it overflows the header downwards without squashing it.
+  document.getElementById('jsonl-viewer-header').appendChild(bar);
+
+  const input = bar.querySelector('.terminal-search-input');
+  const countEl = bar.querySelector('.terminal-search-count');
+  let matches = []; // the <mark> elements, in document order
+  let activeIdx = -1;
+
+  // Each mark back to a plain text node, then normalize() so the parent's text is one
+  // node again — otherwise a second pass would index the same text in fragments.
+  function unmark() {
+    for (const mark of jsonlViewerBody.querySelectorAll('mark.jsonl-find-match')) {
+      const parent = mark.parentNode;
+      if (!parent) continue;
+      parent.replaceChild(document.createTextNode(mark.textContent), mark);
+      parent.normalize();
+    }
+    matches = [];
+  }
+
+  function highlight(query) {
+    unmark();
+    activeIdx = -1;
+    if (!query) { countEl.textContent = ''; return; }
+
+    // Joined with a newline the find input cannot contain, so every hit found in the
+    // haystack lies wholly inside one text node and maps back to it unambiguously.
+    let haystack = '';
+    const index = [];
+    for (const textEl of jsonlViewerBody.querySelectorAll('.jsonl-text')) {
+      const walker = document.createTreeWalker(textEl, NodeFilter.SHOW_TEXT);
+      let node;
+      while ((node = walker.nextNode())) {
+        if (!node.nodeValue) continue;
+        index.push({ node, start: haystack.length });
+        haystack += node.nodeValue + '\n';
+      }
+    }
+
+    const hay = haystack.toLowerCase();
+    const term = query.toLowerCase();
+    const hits = [];
+    let pos = 0;
+    while ((pos = hay.indexOf(term, pos)) !== -1) { hits.push(pos); pos += term.length; }
+    if (!hits.length) { countEl.textContent = 'No results'; return; }
+
+    // Grouped by node and applied back to front within each, so splitting the text for
+    // one hit cannot shift the offsets of the hits before it.
+    const byNode = new Map();
+    let cursor = 0;
+    for (const hit of hits) {
+      while (cursor + 1 < index.length && index[cursor + 1].start <= hit) cursor++;
+      const entry = index[cursor];
+      if (!byNode.has(entry)) byNode.set(entry, []);
+      byNode.get(entry).push(hit - entry.start);
+    }
+    for (const [entry, offsets] of byNode) {
+      for (const offset of offsets.slice().reverse()) {
+        const hitNode = entry.node.splitText(offset);
+        hitNode.splitText(term.length); // leaves hitNode holding exactly the match
+        const mark = document.createElement('mark');
+        mark.className = 'jsonl-find-match';
+        mark.textContent = hitNode.nodeValue;
+        hitNode.parentNode.replaceChild(mark, hitNode);
+      }
+    }
+
+    // Re-read rather than collected as we went: querySelectorAll is in document order,
+    // which is the order Enter has to walk them in.
+    matches = Array.from(jsonlViewerBody.querySelectorAll('mark.jsonl-find-match'));
+    countEl.textContent = `${matches.length} found`;
+  }
+
+  function goTo(idx, scroll = true) {
+    if (!matches.length) return;
+    activeIdx = ((idx % matches.length) + matches.length) % matches.length;
+    for (const mark of matches) mark.classList.remove('jsonl-find-match-active');
+    const active = matches[activeIdx];
+    active.classList.add('jsonl-find-match-active');
+    if (scroll) active.scrollIntoView({ block: 'center' });
+    countEl.textContent = `${activeIdx + 1} of ${matches.length}`;
+  }
+
+  function open(initialQuery) {
+    bar.style.display = 'flex';
+    if (initialQuery) input.value = initialQuery;
+    input.focus();
+    input.select();
+    highlight(input.value);
+    if (matches.length) goTo(0);
+  }
+
+  function close() {
+    bar.style.display = 'none';
+    input.value = '';
+    unmark();
+    activeIdx = -1;
+    countEl.textContent = '';
+  }
+
+  // Re-applied after every tail append. The pass re-renders whole entry nodes from the
+  // unsettled boundary down, so marks inside them are thrown away with their nodes while
+  // marks above survive — rebuilding the lot is the only way to keep `N` and the active
+  // index honest. It does not scroll: the pass has already decided whether the view was
+  // following the bottom, and a jump here would fight that.
+  function refresh() {
+    if (bar.style.display === 'none' || !input.value) return;
+    const wasActive = activeIdx;
+    highlight(input.value);
+    if (matches.length) goTo(Math.min(Math.max(wasActive, 0), matches.length - 1), false);
+  }
+
+  input.addEventListener('input', () => { highlight(input.value); if (matches.length) goTo(0); });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { close(); e.preventDefault(); }
+    else if (e.key === 'Enter' && e.shiftKey) { goTo(activeIdx - 1); e.preventDefault(); }
+    else if (e.key === 'Enter') { goTo(activeIdx + 1); e.preventDefault(); }
+  });
+  bar.querySelector('.terminal-search-next').addEventListener('click', () => goTo(activeIdx + 1));
+  bar.querySelector('.terminal-search-prev').addEventListener('click', () => goTo(activeIdx - 1));
+  bar.querySelector('.terminal-search-close').addEventListener('click', close);
+
+  return { open, close, refresh };
+}
+
+// Created once and cached on the viewer element, which outlives every session shown in
+// it. Wired on first show rather than at load: `jsonlViewer` is an app.js global, and
+// app.js is the last script on the page.
+function jsonlFindBar() {
+  if (!jsonlViewer._jsonlFindBar) {
+    jsonlViewer._jsonlFindBar = createJsonlFindBar();
+    // The body is made focusable so a click in the transcript gives it focus and this
+    // keydown — which only fires for focus inside the viewer — can reach us.
+    jsonlViewerBody.setAttribute('tabindex', '0');
+    jsonlViewer.addEventListener('keydown', (e) => {
+      const mod = /Mac|iPhone|iPad/.test(navigator.platform) ? e.metaKey : e.ctrlKey;
+      if (e.key === 'f' && mod && !e.shiftKey && !e.altKey && jsonlViewer.style.display !== 'none') {
+        e.preventDefault();
+        openJsonlFind();
+      }
+    });
+  }
+  return jsonlViewer._jsonlFindBar;
+}
+
+function openJsonlFind(query) {
+  jsonlFindBar().open(query);
 }
 
 function onTranscriptChanged(sessionId) {
@@ -782,6 +1019,10 @@ async function jsonlTailPass() {
   // Follow the tail only if the view was already at the bottom, so reading back
   // through a session is never yanked forward by the other process writing.
   if (wasAtBottom) jsonlViewerBody.scrollTop = jsonlViewerBody.scrollHeight;
+
+  // The re-render above took every mark below the boundary with it. Rebuild them so the
+  // bar's `N` and its active index describe what is now on screen.
+  jsonlViewer._jsonlFindBar?.refresh();
 }
 
 // Wired once at load. Guarded so this file can also be required in Node for the
@@ -793,5 +1034,5 @@ if (typeof window !== 'undefined' && window.api && window.api.onTranscriptChange
 // Expose the pure list/boundary helpers to Node for unit testing. No-op in the
 // browser, where this file is loaded as a plain <script> and `module` is undefined.
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { mergeLocalCommandEntries, computeSafeFrom, getEntryText, UNSETTLED_TOOL_WINDOW };
+  module.exports = { mergeLocalCommandEntries, computeSafeFrom, getEntryText, conversationText, countOccurrences, UNSETTLED_TOOL_WINDOW };
 }

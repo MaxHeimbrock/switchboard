@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('api', {
   archiveSession: (id, archived) => ipcRenderer.invoke('archive-session', id, archived),
   openTerminal: (id, projectPath, isNew, sessionOptions) => ipcRenderer.invoke('open-terminal', id, projectPath, isNew, sessionOptions),
   search: (type, query, titleOnly) => ipcRenderer.invoke('search', type, query, titleOnly),
+  countOccurrences: (type, ids, query) => ipcRenderer.invoke('count-occurrences', type, ids, query),
   readSessionTail: (sessionId, cursor) => ipcRenderer.invoke('read-session-tail', sessionId, cursor),
   watchSessionTranscript: (sessionId) => ipcRenderer.invoke('watch-session-transcript', sessionId),
   unwatchSessionTranscript: (sessionId) => ipcRenderer.invoke('unwatch-session-transcript', sessionId),

@@ -128,9 +128,17 @@ function createCMSearchBar(parent, view) {
     countEl.textContent = `${activeIdx + 1} of ${matches.length}`;
   }
 
-  function open() {
+  // `initialQuery` beats the selection-seeding path below: a caller opening us from the
+  // sidebar's search already knows exactly what it is looking for.
+  function open(initialQuery) {
     bar.style.display = 'flex';
     input.focus();
+    if (initialQuery) {
+      input.value = initialQuery;
+      findAll();
+      if (matches.length) goTo(0);
+      return;
+    }
     const sel = view.state.sliceDoc(view.state.selection.main.from, view.state.selection.main.to);
     if (sel) { input.value = sel; findAll(); if (matches.length) goTo(0); }
   }
@@ -170,14 +178,14 @@ const cmFindKeymap = keymap.of([{
   },
 }]);
 
-function openCMSearch(view) {
+function openCMSearch(view, query) {
   const parent = view.dom.parentElement;
   // Close goto-line if open
   if (parent._cmGotoLine) parent._cmGotoLine.close();
   if (!parent._cmSearchBar) {
     parent._cmSearchBar = createCMSearchBar(parent, view);
   }
-  parent._cmSearchBar.open();
+  parent._cmSearchBar.open(query);
 }
 
 // DOM-level Cmd/Ctrl+F listener for read-only editors where CM keymaps don't fire
@@ -539,6 +547,7 @@ window.CMEditorView = EditorView;
 window.CMEditorState = EditorState;
 window.CMMergeView = MergeView;
 window.cmOpenGotoLine = openGotoLine;
+window.cmOpenSearch = openCMSearch;
 
 marked.setOptions({ breaks: true, gfm: true });
 window.marked = marked;

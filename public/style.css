@@ -2194,6 +2194,15 @@ body { display: flex; flex-direction: column; }
   background: #18181f;
   border-bottom: 1px solid rgba(255,255,255,0.06);
   flex-shrink: 0;
+  /* Positioning context for the find bar, which hangs below the header. */
+  position: relative;
+}
+
+/* Just clear of the header's own bottom edge, so it never covers the resume and close
+   buttons — and no height to keep in step if the header's contents change. */
+#jsonl-viewer-header > .terminal-search-bar {
+  top: calc(100% + 4px);
+  right: 16px;
 }
 
 #jsonl-viewer-title {
@@ -2247,6 +2256,23 @@ body { display: flex; flex-direction: column; }
   flex: 1;
   overflow-y: auto;
   padding: 8px 16px;
+}
+
+/* Focusable so the viewer's Cmd+F keydown is in reach; the ring would only frame the
+   whole transcript, so it is suppressed. */
+#jsonl-viewer-body:focus { outline: none; }
+
+/* Find-bar highlights, from the CodeMirror bar's cm-find-match theme so the two views
+   mark a hit the same way. */
+.jsonl-find-match {
+  background: #515C6A;
+  color: inherit;
+  border-radius: 2px;
+}
+
+.jsonl-find-match-active {
+  background: #EAA549;
+  color: #1a1a22;
 }
 
 #jsonl-viewer-body::-webkit-scrollbar { width: 5px; }
@@ -2728,6 +2754,21 @@ body { display: flex; flex-direction: column; }
   padding: 1px 6px;
   border-radius: 8px;
   margin-left: 4px;
+}
+
+/* Occurrence count on a card matched by a full-text search. The auto right margin
+   keeps it beside the date in a space-between meta line, rather than stranded in
+   the middle of it. */
+.search-hit-count {
+  font-size: 9px;
+  font-weight: 600;
+  color: #cdd6f4;
+  background: rgba(122,162,247,0.22);
+  padding: 1px 6px;
+  border-radius: 8px;
+  margin-left: 5px;
+  margin-right: auto;
+  flex-shrink: 0;
 }
 
 .memory-source-badge {

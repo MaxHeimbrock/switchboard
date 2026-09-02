@@ -235,18 +235,11 @@ function closeGridCard(sessionId) {
 function showGridView() {
   gridViewActive = true;
   localStorage.setItem('gridViewActive', '1');
-  placeholder.style.display = 'none';
-  terminalHeader.style.display = 'none';
-
-  // Hide other viewers but keep terminal-area visible
-  planViewer.style.display = 'none';
-  statsViewer.style.display = 'none';
-  memoryViewer.style.display = 'none';
-  settingsViewer.style.display = 'none';
-  jsonlViewer.style.display = 'none';
-  terminalArea.style.display = '';
-  // Hidden by hand rather than through hideAllViewers, so the tail is stopped here too.
-  stopJsonlTail();
+  // Choosing the grid is a choice about the main area, not a detour away from it, so a
+  // transcript on screen is forgotten rather than kept — which is what showMainView does
+  // for every view but the transcript's own. The grid is the one view that keeps
+  // #terminal-area visible: #grid-viewer lives inside it.
+  showMainView('grid');
 
   // Switch #terminals to grid layout
   terminalsEl.classList.add('grid-layout');

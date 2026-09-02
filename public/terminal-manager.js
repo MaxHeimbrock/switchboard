@@ -390,8 +390,7 @@ function showSession(sessionId) {
   } else {
     // Single terminal view
     document.querySelectorAll('.terminal-container').forEach(el => el.classList.remove('visible'));
-    placeholder.style.display = 'none';
-    hidePlanViewer();
+    showMainView('terminal');
     if (session) showTerminalHeader(session);
     if (entry) {
       entry.element.classList.add('visible');

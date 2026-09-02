@@ -1,7 +1,7 @@
 // --- JSONL Message History Viewer ---
-// Depends on globals: escapeHtml (utils.js), hideAllViewers (plans-memory-view.js),
-// placeholder, terminalArea, jsonlViewer, jsonlViewerTitle, jsonlViewerSessionId,
-// jsonlViewerBody, restoreMainArea (app.js)
+// Depends on globals: escapeHtml (utils.js), jsonlViewer, jsonlViewerTitle,
+// jsonlViewerSessionId, jsonlViewerBody, jsonlViewerResumeBtn, lockedSessions,
+// activePtyIds, showMainView, showBaseMainArea, restoreMainArea (app.js)
 //
 // Also the home of conversationText() — the single definition of what a keyword search
 // counts and what the transcript's find bar searches. It is required by main.js for the
@@ -667,7 +667,15 @@ function countOccurrences(haystack, query) {
 // `nodes` runs parallel to the body's children: [{ from, el }] ascending by `from`,
 // so the tail can be dropped by raw index. `gen` invalidates a pass whose session
 // was navigated away from while it was awaiting its read.
-const jsonlTail = { gen: 0, session: null, cursor: null, raw: [], nodes: [], safeFrom: 0 };
+//
+// `suspended` is the detour state: the watcher is released, but everything the view is
+// made of — the rendered body, the cursor, the find bar's marks — is kept, so coming
+// back is a re-show rather than a reopen. `scrollTop` is remembered alongside it
+// because a hidden scroller reads 0 for every offset it has.
+const jsonlTail = {
+  gen: 0, session: null, cursor: null, raw: [], nodes: [], safeFrom: 0,
+  suspended: false, scrollTop: 0,
+};
 
 // Passes are serialised: two of them reading the same cursor would each append the
 // same entries. A change arriving mid-pass sets `pending` and runs one more.
@@ -675,10 +683,11 @@ let jsonlTailBusy = false;
 let jsonlTailPending = false;
 
 async function showJsonlViewer(session, opts = {}) {
-  hideAllViewers();
-  placeholder.style.display = 'none';
-  terminalArea.style.display = 'none';
-  jsonlViewer.style.display = 'flex';
+  // Opening a transcript ends whatever the last one was doing — its find bar goes with
+  // it, and a suspended one is forgotten rather than restored over this one. showMainView
+  // deliberately leaves the tail alone for its own view, so the opener says it here.
+  stopJsonlTail();
+  showMainView('transcript');
 
   const displayName = session.name || session.aiTitle || session.summary || session.sessionId;
   jsonlViewerTitle.textContent = displayName;
@@ -714,6 +723,9 @@ async function showJsonlViewer(session, opts = {}) {
   await window.api.watchSessionTranscript(session.sessionId);
 }
 
+// Forget the transcript entirely: the tail stops, the bar closes, and nothing is kept
+// for a return. Every view but the transcript's own goes through here on its way in,
+// unless the transcript is suspended and expecting to come back.
 function stopJsonlTail() {
   const tailing = jsonlTail.session;
   // The bar belongs to the transcript being left, not to the next one: its query and
@@ -725,10 +737,66 @@ function stopJsonlTail() {
   jsonlTail.raw = [];
   jsonlTail.nodes = [];
   jsonlTail.safeFrom = 0;
+  jsonlTail.suspended = false;
+  jsonlTail.scrollTop = 0;
   // Named, so a stop for the transcript we were on cannot take down a watcher a
   // reopen has already installed for another. Skipped entirely when nothing was
-  // tailing — hideAllViewers runs on every navigation, tail or no tail.
+  // tailing — showMainView runs on every navigation, tail or no tail.
   if (tailing) window.api.unwatchSessionTranscript(tailing.sessionId);
+}
+
+// Leave the transcript for another view, keeping it whole for the way back: release the
+// watcher and remember where the reader was, but touch nothing the view is made of. The
+// rendered body, the cursor and the find bar's query and marks *are* the restore — blank
+// any of them and "exactly as you left it" becomes a reopen.
+//
+// Opt-in, and deliberately not what showMainView does by default: a detour that forgets
+// to call this loses a memory, where a default of remembering would leak a watcher.
+function suspendJsonlTail() {
+  if (!jsonlTail.session || jsonlTail.suspended) return;
+  jsonlTail.suspended = true;
+  // Read while the element is still visible: a display:none scroller reports 0 for
+  // scrollTop, scrollHeight and clientHeight alike.
+  jsonlTail.scrollTop = jsonlViewerBody.scrollTop;
+  // A pass already awaiting its read returns at the generation check rather than
+  // measuring a hidden element and deciding it was following the bottom.
+  jsonlTail.gen++;
+  window.api.unwatchSessionTranscript(jsonlTail.session.sessionId);
+}
+
+// Put back the transcript a detour suspended, exactly as it was left. The scroll is
+// reassigned before the catch-up pass runs, so the pass measures a visible element at
+// the reader's position and appends below it instead of following the tail.
+async function resumeJsonlTail() {
+  if (!jsonlTail.suspended) return;
+  const session = jsonlTail.session;
+  const gen = jsonlTail.gen;
+  // The one thing that can have gone wrong while away is that the file is no longer
+  // readable, and jsonlTailPass swallows a mid-tail error by design, so it cannot report
+  // it. Probed here instead. The pass below repeats the read — one small extra read to
+  // keep the cursor advancing in a single place.
+  const probe = await window.api.readSessionTail(session.sessionId, jsonlTail.cursor);
+  // Something else took the main area while we were awaiting; it owns the view now.
+  if (gen !== jsonlTail.gen) return;
+  if (probe.error) {
+    stopJsonlTail();
+    showBaseMainArea();
+    return;
+  }
+
+  jsonlTail.suspended = false;
+  showMainView('transcript');
+  jsonlViewerBody.scrollTop = jsonlTail.scrollTop;
+  // Focus is what puts Cmd+F back in reach; preventScroll keeps it from undoing the line
+  // above by scrolling the body to wherever focus happens to land.
+  jsonlViewerBody.focus({ preventScroll: true });
+  setResumeAffordance(jsonlViewerResumeBtn, lockedSessions.has(session.sessionId)
+    && !activePtyIds.has(session.sessionId));
+  // Watched before the catch-up rather than after it, the reverse of a first open: there
+  // is no empty-DOM window to protect here, and an append arriving mid-pass is serialised
+  // by jsonlTailBusy.
+  await window.api.watchSessionTranscript(session.sessionId);
+  await updateJsonlView();
 }
 
 function closeJsonlViewer() {

@@ -53,7 +53,6 @@ let gridViewActive = localStorage.getItem('gridViewActive') === '1';
 
 // Map<sessionId, { terminal, element, fitAddon, session, closed }>
 const openSessions = new Map();
-window._openSessions = openSessions;
 let activeSessionId = sessionStorage.getItem('activeSessionId') || null;
 function setActiveSession(id) {
   activeSessionId = id;
@@ -897,6 +896,7 @@ async function launchNewSession(project, sessionOptions) {
   }
   if (typeof setSessionMcpActive === 'function') setSessionMcpActive(sessionId, !!result.mcpActive);
 
+  stopJsonlTail();
   showSession(sessionId);
   pollActiveSessions();
 }
@@ -985,6 +985,9 @@ async function openSession(session, customOptions) {
         return;
       }
     } else {
+      // Opening a session's terminal is a choice, not a detour: a transcript suspended
+      // behind it is forgotten rather than restored over the terminal just asked for.
+      stopJsonlTail();
       showSession(sessionId);
       return;
     }
@@ -1030,6 +1033,7 @@ async function openSession(session, customOptions) {
   }
   if (typeof setSessionMcpActive === 'function') setSessionMcpActive(sessionId, !!result.mcpActive);
 
+  stopJsonlTail();
   showSession(sessionId);
   pollActiveSessions();
 }
@@ -1048,24 +1052,93 @@ window.addEventListener('resize', () => {
   }
 });
 
-// Put the main area back to whatever it was showing before a viewer took it over:
-// the grid, the active session's terminal, or the placeholder. Shared by the
-// sessions-tab switch and the transcript view's close button.
-function restoreMainArea() {
-  hideAllViewers();
+// --- The main area ---
+//
+// One table, one function, one place a view can be taken over. Every opener used to
+// hand-roll the list of views it wanted hidden, which meant every new view had to be
+// added to each of those lists — and the transcript view never was, so opening a plan
+// left it on top with its file watcher still running.
+//
+// The two flags are why a single helper covers views as different as the grid and a
+// settings panel. `terminalArea` says whether #terminal-area stays visible underneath:
+// #grid-viewer lives inside it, so the grid needs it, while every overlay needs it gone
+// — it is `position:absolute; inset:0` and sits after them in the document with no
+// z-index, so left visible it paints straight over whatever was just opened.
+const MAIN_VIEWS = {
+  terminal:    { el: null,           display: '',      terminalArea: true },
+  grid:        { el: gridViewer,     display: 'block', terminalArea: true },
+  placeholder: { el: placeholder,    display: '',      terminalArea: false },
+  plan:        { el: planViewer,     display: 'flex',  terminalArea: false },
+  memory:      { el: memoryViewer,   display: 'flex',  terminalArea: false },
+  stats:       { el: statsViewer,    display: 'flex',  terminalArea: false },
+  settings:    { el: settingsViewer, display: 'flex',  terminalArea: false },
+  transcript:  { el: jsonlViewer,    display: 'flex',  terminalArea: false },
+};
+
+// Show one view in the main area and nothing else. Also the one place the transcript's
+// file watcher is released, so no view can be shown with the tail still running behind
+// it. A suspended transcript is the one exception: it has released its own watcher and
+// is being kept for the way back, so it is not torn down here.
+function showMainView(view) {
+  const target = MAIN_VIEWS[view];
+  if (!target) return;
+  if (view !== 'transcript' && !jsonlTail.suspended) stopJsonlTail();
+  for (const [name, row] of Object.entries(MAIN_VIEWS)) {
+    if (row.el && name !== view) row.el.style.display = 'none';
+  }
+  if (target.el) target.el.style.display = target.display;
+  terminalArea.style.display = target.terminalArea ? '' : 'none';
+  // The terminal path has its own owner for the header (showTerminalHeader); the grid
+  // is the only view that has to take it down.
+  if (view === 'grid') terminalHeader.style.display = 'none';
+}
+
+// The main area with no viewer over it: the grid, the active session's terminal, or the
+// placeholder. This is the drop half of a detour — it does not put a suspended
+// transcript back, which is what makes it usable by the tab switches that leave the
+// Sessions tab.
+function showBaseMainArea() {
   if (gridViewActive) {
     // Grid is still set up — just re-show it and refit
-    placeholder.style.display = 'none';
-    terminalHeader.style.display = 'none';
-    gridViewer.style.display = 'block';
+    showMainView('grid');
     for (const entry of openSessions.values()) {
       if (!entry.closed) fitAndScroll(entry);
     }
   } else if (activeSessionId && openSessions.has(activeSessionId)) {
     showSession(activeSessionId);
   } else {
-    placeholder.style.display = '';
+    showMainView('placeholder');
   }
+}
+
+// Leaving the Sessions tab. The transcript is the one thing that has to go — it belongs
+// to a list the sidebar is no longer showing, and waiting for a file to be clicked before
+// taking it down is the bug this all started from. Guarded on there being one, so a plan
+// or an agent file already open survives a hop between those two tabs as it does today —
+// and so browsing plans never quietly puts the keyboard back into a live terminal.
+function dropOpenTranscript() {
+  if (!jsonlTail.session || jsonlTail.suspended) return;
+  suspendJsonlTail();
+  showBaseMainArea();
+}
+
+// Put the main area back after a viewer took it over: the transcript that was suspended
+// on the way out, or failing that the grid, the active session's terminal, or the
+// placeholder. Shared by the sessions-tab switch, the settings panel's close button and
+// the transcript view's own close button.
+//
+// One word apart from showBaseMainArea and the opposite meaning: this one restores, that
+// one drops. Coming back wants this; leaving wants that.
+function restoreMainArea() {
+  if (jsonlTail.suspended) {
+    // Terminal wins. The session started running here while we were away — resumed from
+    // the sidebar, or launched by a scheduled task — so the transcript is forgotten
+    // rather than put back over the terminal it belongs to. Decided here, on the way
+    // back, rather than by watching for the PTY to appear while away.
+    if (isRunningHere(jsonlTail.session.sessionId)) stopJsonlTail();
+    else { resumeJsonlTail(); return; }
+  }
+  showBaseMainArea();
 }
 
 // --- Tab switching ---
@@ -1107,19 +1180,19 @@ document.querySelectorAll('.sidebar-tab').forEach(tab => {
       searchBar.style.display = '';
       searchInput.placeholder = 'Search plans...';
       plansContent.style.display = '';
+      dropOpenTranscript();
       loadPlans();
     } else if (tabName === 'stats') {
       statsContent.style.display = '';
       // Immediately show stats viewer in main area
-      hideAllViewers();
-      placeholder.style.display = 'none';
-      terminalArea.style.display = 'none';
-      statsViewer.style.display = 'flex';
+      suspendJsonlTail();
+      showMainView('stats');
       loadStats();
     } else if (tabName === 'memory') {
       searchBar.style.display = '';
       searchInput.placeholder = 'Search agent files...';
       memoryContent.style.display = '';
+      dropOpenTranscript();
       loadMemories();
     }
   });

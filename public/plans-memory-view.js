@@ -1,7 +1,7 @@
 // --- Plans & Memory viewers ---
-// Depends on globals: cachedPlans, plansContent, planPanel, planViewer,
-// memoryContent, memoryPanel, memoryViewer, placeholder, terminalArea,
-// statsViewer, settingsViewer, jsonlViewer, searchJumpOpts (app.js)
+// Depends on globals: cachedPlans, plansContent, planPanel, memoryContent,
+// memoryPanel, searchJumpOpts, showMainView (app.js),
+// suspendJsonlTail (jsonl-viewer.js)
 // Depends on: formatDate, searchHitBadge (utils.js)
 
 let currentPlanContent = "";
@@ -84,31 +84,12 @@ async function openPlan(plan, opts = {}) {
   currentPlanFilePath = result.filePath;
   currentPlanFilename = plan.filename;
 
-  // Hide terminal area and placeholder, show plan viewer
-  placeholder.style.display = 'none';
-  terminalArea.style.display = 'none';
-  statsViewer.style.display = 'none';
-  memoryViewer.style.display = 'none';
-  settingsViewer.style.display = 'none';
-  planViewer.style.display = 'flex';
+  // A detour, so the transcript is kept for the way back rather than torn down — its
+  // watcher is released either way, which is what used to leak here.
+  suspendJsonlTail();
+  showMainView('plan');
 
   planPanel.open(plan.title, currentPlanFilePath, currentPlanContent, opts);
-}
-
-function hideAllViewers() {
-  planViewer.style.display = 'none';
-  statsViewer.style.display = 'none';
-  memoryViewer.style.display = 'none';
-  settingsViewer.style.display = 'none';
-  jsonlViewer.style.display = 'none';
-  terminalArea.style.display = '';
-  // The chokepoint every navigation-away passes through, so it is where the
-  // transcript tail's file watcher is released. A no-op when nothing is tailing.
-  stopJsonlTail();
-}
-
-function hidePlanViewer() {
-  hideAllViewers();
 }
 
 // --- Memory ---
@@ -280,13 +261,9 @@ async function openMemory(file, opts = {}) {
   currentMemoryFilePath = file.filePath;
   currentMemoryContent = content;
 
-  // Show memory viewer in main area
-  placeholder.style.display = 'none';
-  terminalArea.style.display = 'none';
-  planViewer.style.display = 'none';
-  statsViewer.style.display = 'none';
-  settingsViewer.style.display = 'none';
-  memoryViewer.style.display = 'flex';
+  // A detour, exactly as openPlan: keep the transcript, release its watcher.
+  suspendJsonlTail();
+  showMainView('memory');
 
   memoryPanel.open(file.displayName || file.filename, file.filePath, content, opts);
 }

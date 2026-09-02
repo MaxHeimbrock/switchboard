@@ -2,26 +2,15 @@
 // Manages the global and project settings viewer UI.
 
 (function () {
-  const settingsViewer = document.getElementById('settings-viewer');
   const settingsViewerTitle = document.getElementById('settings-viewer-title');
   const settingsViewerBody = document.getElementById('settings-viewer-body');
 
+  // Closing the panel is a return, so it goes through app.js's restore rather than
+  // re-deriving the state of the main area from localStorage: that copy could only ever
+  // approximate what restoreMainArea already knows, and it knew nothing of the
+  // transcript. Resolved at click time, so app.js having loaded after this file is fine.
   function closeSettingsViewer() {
-    settingsViewer.style.display = 'none';
-    const terminalArea = document.getElementById('terminal-area');
-    const terminalHeader = document.getElementById('terminal-header');
-    const placeholder = document.getElementById('placeholder');
-    const gridViewActive = localStorage.getItem('gridViewActive') === '1';
-    const activeSessionId = sessionStorage.getItem('activeSessionId') || null;
-    // Check if there's an active session with an open terminal
-    if (activeSessionId && window._openSessions && window._openSessions.has(activeSessionId)) {
-      terminalArea.style.display = '';
-      terminalHeader.style.display = '';
-    } else if (gridViewActive) {
-      terminalArea.style.display = '';
-    } else {
-      placeholder.style.display = '';
-    }
+    restoreMainArea();
   }
 
   async function openSettingsViewer(scope, projectPath) {
@@ -36,14 +25,10 @@
 
     settingsViewerTitle.textContent = (isProject ? 'Project Settings — ' : 'Global Settings — ') + shortName;
 
-    // Show settings viewer, hide others
-    document.getElementById('placeholder').style.display = 'none';
-    document.getElementById('terminal-area').style.display = 'none';
-    document.getElementById('plan-viewer').style.display = 'none';
-    document.getElementById('stats-viewer').style.display = 'none';
-    document.getElementById('memory-viewer').style.display = 'none';
-    document.getElementById('jsonl-viewer').style.display = 'none';
-    settingsViewer.style.display = 'flex';
+    // A detour like a plan or an agent file: the transcript is kept for the way back,
+    // and its watcher released — which this panel used to leave running.
+    suspendJsonlTail();
+    showMainView('settings');
 
     function useGlobalCheckbox(fieldName) {
       if (!isProject) return '';
@@ -382,8 +367,7 @@
       removeBtn.addEventListener('click', async () => {
         if (!confirm(`Hide project "${shortName}" from Switchboard?\n\nThis hides the project from the sidebar. Your session files are not deleted.`)) return;
         await window.api.removeProject(projectPath);
-        settingsViewer.style.display = 'none';
-        document.getElementById('placeholder').style.display = 'flex';
+        showMainView('placeholder');
         if (typeof loadProjects === 'function') loadProjects();
       });
     }

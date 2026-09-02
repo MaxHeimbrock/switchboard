@@ -160,6 +160,9 @@ async function launchTerminalSession(project) {
     return;
   }
 
+  // Launching a terminal is a choice, like openSession: a suspended transcript is
+  // forgotten rather than restored over the pane just asked for.
+  stopJsonlTail();
   showSession(sessionId);
   pollActiveSessions();
 }
